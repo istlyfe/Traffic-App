@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  Alert,
   FlatList,
   Pressable,
   StyleSheet,
@@ -8,7 +9,13 @@ import {
   View,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { listSessions, listObservationsForSession } from '@/database/repositories';
+import {
+  deleteSession,
+  listSessions,
+  listObservationsForSession,
+} from '@/database/repositories';
+import { useSessionStore } from '@/stores/sessionStore';
+import { useSyncStore } from '@/stores/syncStore';
 import { analyzeSequence } from '@/utils/cycles';
 import { SyncPill } from '@/components/StatePill';
 import { formatDate, formatClock } from '@/utils/time';
@@ -25,21 +32,54 @@ export default function SessionsScreen() {
   const [sessions, setSessions] = useState<SessionRowData[]>([]);
   const [intersectionFilter, setIntersectionFilter] = useState('');
   const [dateFilter, setDateFilter] = useState(''); // YYYY-MM-DD prefix match
+  const activeSession = useSessionStore((s) => s.activeSession);
+  const refreshCounts = useSyncStore((s) => s.refreshCounts);
+
+  const reload = useCallback(() => {
+    const rows = listSessions().map((session) => {
+      const observations = listObservationsForSession(session.clientGeneratedId);
+      const analysis = analyzeSequence(observations);
+      return {
+        ...session,
+        cycleCount: analysis.stats.completeCycleCount,
+        observationCount: observations.length,
+        unsyncedCount: observations.filter((o) => o.syncStatus !== 'synced').length,
+      };
+    });
+    setSessions(rows);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      const rows = listSessions().map((session) => {
-        const observations = listObservationsForSession(session.clientGeneratedId);
-        const analysis = analyzeSequence(observations);
-        return {
-          ...session,
-          cycleCount: analysis.stats.completeCycleCount,
-          observationCount: observations.length,
-          unsyncedCount: observations.filter((o) => o.syncStatus !== 'synced').length,
-        };
-      });
-      setSessions(rows);
-    }, []),
+      reload();
+    }, [reload]),
+  );
+
+  const onDelete = useCallback(
+    (item: SessionRowData) => {
+      if (activeSession?.clientGeneratedId === item.clientGeneratedId) {
+        Alert.alert('Session is active', 'End the session before deleting it.');
+        return;
+      }
+      Alert.alert(
+        'Delete session?',
+        `${item.intersectionName} — ${item.observationCount} observations will be removed` +
+          (item.syncStatus === 'synced' ? ' locally and from the server.' : '.'),
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () => {
+              deleteSession(item.clientGeneratedId);
+              refreshCounts();
+              reload();
+            },
+          },
+        ],
+      );
+    },
+    [activeSession, refreshCounts, reload],
   );
 
   const filtered = useMemo(() => {
@@ -97,9 +137,18 @@ export default function SessionsScreen() {
                 {item.unsyncedCount > 0 ? ` · ${item.unsyncedCount} unsynced` : ''}
               </Text>
             </View>
-            <SyncPill
-              status={item.unsyncedCount > 0 ? 'pending' : item.syncStatus}
-            />
+            <View style={styles.rowSide}>
+              <SyncPill
+                status={item.unsyncedCount > 0 ? 'pending' : item.syncStatus}
+              />
+              <Pressable
+                hitSlop={8}
+                style={styles.deleteButton}
+                onPress={() => onDelete(item)}
+              >
+                <Text style={styles.deleteLabel}>Delete</Text>
+              </Pressable>
+            </View>
           </Pressable>
         )}
       />
@@ -135,5 +184,8 @@ const styles = StyleSheet.create({
   rowMain: { flex: 1, marginRight: spacing.sm },
   rowName: { color: colors.text, fontSize: 15, fontWeight: '700' },
   rowMeta: { color: colors.textDim, fontSize: 12, marginTop: 2 },
+  rowSide: { alignItems: 'flex-end', gap: 8 },
+  deleteButton: { paddingVertical: 4, paddingHorizontal: 6 },
+  deleteLabel: { color: colors.danger, fontSize: 12, fontWeight: '700' },
   empty: { color: colors.textDim, textAlign: 'center', paddingVertical: spacing.xl },
 });

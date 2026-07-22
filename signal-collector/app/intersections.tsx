@@ -112,16 +112,22 @@ export default function IntersectionsScreen() {
   );
 
   // Auto-detected signal: nearest within 75 m ahead of the direction of
-  // travel (or plain nearest when stationary). Used to pre-fill the session
-  // instead of manual labels.
+  // travel (or plain nearest when stationary). When nothing is that close —
+  // common while testing parked indoors with coarse GPS — fall back to the
+  // nearest saved intersection within 500 m, flagged as approximate.
   const suggestion = useMemo(() => {
     if (!fix) return null;
-    return findSignalAhead(
+    const strict = findSignalAhead(
       intersections,
       fix.latitude,
       fix.longitude,
       fix.headingDegrees,
     );
+    if (strict) return { ...strict, approximate: false };
+    const nearby = findSignalAhead(intersections, fix.latitude, fix.longitude, null, {
+      radiusMeters: 500,
+    });
+    return nearby ? { ...nearby, approximate: true } : null;
   }, [fix, intersections]);
 
   return (
@@ -148,6 +154,7 @@ export default function IntersectionsScreen() {
             📍 {suggestion.intersection.name}
           </Text>
           <Text style={styles.suggestionMeta}>
+            {suggestion.approximate ? 'nearest saved · ' : ''}
             {formatDistance(suggestion.distanceMeters)} away
             {suggestion.approachDirection ? ` · ${suggestion.approachDirection}` : ''}
             {suggestion.intersection.maintainingAgency

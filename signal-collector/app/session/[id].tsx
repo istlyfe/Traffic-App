@@ -9,14 +9,17 @@ import {
   View,
 } from 'react-native';
 import MapView, { Polyline, Marker } from 'react-native-maps';
-import { useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import {
   correctObservationState,
   deleteObservation,
+  deleteSession,
   getSessionByClientId,
   listObservationsForSession,
   listSamplesForSession,
 } from '@/database/repositories';
+import { useSessionStore } from '@/stores/sessionStore';
+import { useSyncStore } from '@/stores/syncStore';
 import { analyzeSequence } from '@/utils/cycles';
 import { SIGNAL_STATES } from '@/types/models';
 import type {
@@ -68,6 +71,34 @@ export default function SessionReviewScreen() {
     }
     return map;
   }, [analysis]);
+
+  const activeSession = useSessionStore((s) => s.activeSession);
+  const refreshCounts = useSyncStore((s) => s.refreshCounts);
+
+  const onDeleteSession = useCallback(() => {
+    if (!session) return;
+    if (activeSession?.clientGeneratedId === session.clientGeneratedId) {
+      Alert.alert('Session is active', 'End the session before deleting it.');
+      return;
+    }
+    Alert.alert(
+      'Delete session?',
+      `"${session.intersectionName}" and its ${observations.length} observations will be removed` +
+        (session.syncStatus === 'synced' ? ' locally and from the server.' : '.'),
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            deleteSession(session.clientGeneratedId);
+            refreshCounts();
+            router.back();
+          },
+        },
+      ],
+    );
+  }, [session, observations.length, activeSession, refreshCounts]);
 
   const onDelete = useCallback(
     (obs: SignalObservation) => {
@@ -188,6 +219,10 @@ export default function SessionReviewScreen() {
         </View>
       )}
 
+      <Pressable style={styles.deleteSessionButton} onPress={onDeleteSession}>
+        <Text style={styles.deleteSessionLabel}>Delete session</Text>
+      </Pressable>
+
       <Modal visible={editing != null} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
@@ -283,6 +318,15 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     width: '100%',
   },
+  deleteSessionButton: {
+    borderColor: colors.danger,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  deleteSessionLabel: { color: colors.danger, fontWeight: '700', fontSize: 15 },
   stateGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   stateChoice: { padding: 6, borderRadius: 8 },
   stateChoiceActive: { backgroundColor: colors.bg },

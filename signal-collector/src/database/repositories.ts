@@ -388,6 +388,47 @@ export function endSession(clientGeneratedId: string, notes: string | null): voi
   enqueueSessionUpsert(clientGeneratedId);
 }
 
+/**
+ * Delete a session and everything belonging to it (observations, location
+ * samples, queued uploads). If the session already reached the server, a
+ * single remote delete is queued — Postgres ON DELETE CASCADE removes the
+ * server-side children.
+ */
+export function deleteSession(sessionClientId: string): void {
+  const db = getDb();
+  const session = getSessionByClientId(sessionClientId);
+  if (!session) return;
+  const childIds = [
+    sessionClientId,
+    ...listObservationsForSession(sessionClientId).map((o) => o.clientGeneratedId),
+    ...listSamplesForSession(sessionClientId).map((s) => s.clientGeneratedId),
+  ];
+  db.withTransactionSync(() => {
+    db.runSync(`DELETE FROM local_observations WHERE session_client_id = ?`, [
+      sessionClientId,
+    ]);
+    db.runSync(`DELETE FROM local_location_samples WHERE session_client_id = ?`, [
+      sessionClientId,
+    ]);
+    db.runSync(`DELETE FROM local_sessions WHERE client_generated_id = ?`, [
+      sessionClientId,
+    ]);
+    // Cancel any pending uploads for the session and its children.
+    const CHUNK = 100;
+    for (let i = 0; i < childIds.length; i += CHUNK) {
+      const chunk = childIds.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => '?').join(',');
+      db.runSync(
+        `DELETE FROM sync_queue WHERE op = 'upsert' AND client_generated_id IN (${placeholders})`,
+        chunk,
+      );
+    }
+  });
+  if (session.syncStatus === 'synced') {
+    enqueue('session', 'delete', sessionClientId, { id: sessionClientId });
+  }
+}
+
 export function appendSessionNote(clientGeneratedId: string, note: string): void {
   const db = getDb();
   const session = getSessionByClientId(clientGeneratedId);
