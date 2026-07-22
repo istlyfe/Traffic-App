@@ -147,14 +147,19 @@ function featureLatLng(feature) {
   return null;
 }
 
+// Field candidates verified against the live layers (2026-07):
+// Broward GeoHub: MAJOR_STRE, MINOR_STRE, CITY_1, DEVICE_TYP, OBJECTID
+// FDOT RCI 18:    MAINTAGC, SIGNALID
 const NAME_FIELDS = [
-  'LOCATION', 'LOCATION_DESC', 'INTERSECTION', 'INTERSECTION_NAME', 'INT_NAME',
-  'SIGNAL_LOCATION', 'DESCRIPTION', 'SITE_NAME', 'NAME', 'MAIN_STREET', 'ON_STREET',
+  'MAJOR_STRE', 'LOCATION', 'LOCATION_DESC', 'INTERSECTION', 'INTERSECTION_NAME',
+  'INT_NAME', 'SIGNAL_LOCATION', 'DESCRIPTION', 'SITE_NAME', 'NAME', 'MAIN_STREET',
+  'ON_STREET', 'ADDRESS',
 ];
-const CROSS_FIELDS = ['CROSS_STREET', 'SIDE_STREET', 'CROSS_ST', 'AT_STREET'];
-const DEVICE_FIELDS = ['DEVICE_TYPE', 'DEVICETYPE', 'DEVICE', 'SIGNAL_TYPE', 'TYPE', 'SUBTYPE'];
+const CROSS_FIELDS = ['MINOR_STRE', 'CROSS_STREET', 'SIDE_STREET', 'CROSS_ST', 'AT_STREET'];
+const CITY_FIELDS = ['CITY', 'CITY_1', 'MUNICIPALITY', 'TOWN'];
+const DEVICE_FIELDS = ['DEVICE_TYP', 'DEVICE_TYPE', 'DEVICETYPE', 'DEVICE', 'SIGNAL_TYPE', 'TYPE', 'SUBTYPE'];
 const ID_FIELDS = ['SIGNAL_ID', 'SIGNALID', 'ASSET_ID', 'ASSETID', 'GlobalID', 'GLOBALID', 'OBJECTID', 'FID'];
-const AGENCY_FIELDS = ['MAINTAINING_AGENCY', 'MAINT_AGENCY', 'MNTAGCY', 'AGENCY', 'MAINTAINED_BY', 'OWNER'];
+const AGENCY_FIELDS = ['MAINTAGC', 'MAINTAINING_AGENCY', 'MAINT_AGENCY', 'MNTAGCY', 'AGENCY', 'MAINTAINED_BY', 'OWNER'];
 
 function normalizeBrowardFeature(feature) {
   const coords = featureLatLng(feature);
@@ -178,7 +183,7 @@ function normalizeBrowardFeature(feature) {
     longitude: coords.lng,
     device_type: pickField(attrs, DEVICE_FIELDS),
     maintaining_agency: pickField(attrs, AGENCY_FIELDS), // county layer may carry it too
-    city: null,
+    city: pickField(attrs, CITY_FIELDS),
     state: 'FL',
     timezone: 'America/New_York',
     source: 'import',
