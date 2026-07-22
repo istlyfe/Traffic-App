@@ -1,0 +1,68 @@
+import type { ExpoConfig, ConfigContext } from 'expo/config';
+
+/**
+ * SignalCollector app configuration.
+ *
+ * Location permission strings are deliberately explicit: reviewers on both
+ * app stores reject vague background-location justifications. Background
+ * location is OFF by default and only started when the user opts in from
+ * Settings.
+ */
+export default ({ config }: ConfigContext): ExpoConfig => ({
+  ...config,
+  name: 'SignalCollector',
+  slug: 'signal-collector',
+  version: '1.0.0',
+  orientation: 'portrait',
+  scheme: 'signalcollector',
+  userInterfaceStyle: 'dark',
+  ios: {
+    bundleIdentifier: 'com.signalcollector.app',
+    supportsTablet: false,
+    infoPlist: {
+      NSLocationWhenInUseUsageDescription:
+        'SignalCollector records your GPS position, speed and heading alongside each traffic-signal observation while you are collecting data.',
+      NSLocationAlwaysAndWhenInUseUsageDescription:
+        'If you enable background collection in Settings, SignalCollector continues recording GPS samples during an active collection session while the app is in the background. Tracking stops when the session ends.',
+      UIBackgroundModes: ['location'],
+    },
+  },
+  android: {
+    package: 'com.signalcollector.app',
+    permissions: [
+      'ACCESS_COARSE_LOCATION',
+      'ACCESS_FINE_LOCATION',
+      'ACCESS_BACKGROUND_LOCATION',
+      'FOREGROUND_SERVICE',
+      'FOREGROUND_SERVICE_LOCATION',
+    ],
+    config: {
+      googleMaps: {
+        apiKey: process.env.GOOGLE_MAPS_ANDROID_API_KEY,
+      },
+    },
+  },
+  plugins: [
+    'expo-router',
+    [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'SignalCollector records your GPS position, speed and heading alongside each traffic-signal observation.',
+        locationAlwaysAndWhenInUsePermission:
+          'If you enable background collection in Settings, SignalCollector keeps recording GPS samples during an active session while the app is backgrounded. Tracking stops when the session ends.',
+        isAndroidBackgroundLocationEnabled: true,
+        isAndroidForegroundServiceEnabled: true,
+      },
+    ],
+    'expo-sqlite',
+  ],
+  experiments: {
+    typedRoutes: true,
+  },
+  extra: {
+    eas: {
+      projectId: process.env.EAS_PROJECT_ID,
+    },
+  },
+});

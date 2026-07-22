@@ -1,0 +1,19 @@
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native build folders (managed workflow regenerates them)
+ios/
+android/
+
+# Env
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# Testing
+coverage/
