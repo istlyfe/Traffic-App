@@ -8,7 +8,7 @@ import * as SQLite from 'expo-sqlite';
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export function getDb(): SQLite.SQLiteDatabase {
   if (!dbInstance) {
@@ -31,6 +31,15 @@ function migrate(db: SQLite.SQLiteDatabase): void {
   const current = row?.user_version ?? 0;
   if (current >= SCHEMA_VERSION) return;
 
+  // v1 -> v2: GIS import columns (fresh installs get them via CREATE below).
+  if (current === 1) {
+    db.execSync(`
+      ALTER TABLE local_intersections ADD COLUMN device_type TEXT;
+      ALTER TABLE local_intersections ADD COLUMN maintaining_agency TEXT;
+      ALTER TABLE local_intersections ADD COLUMN source_id TEXT;
+    `);
+  }
+
   db.execSync(`
     CREATE TABLE IF NOT EXISTS local_intersections (
       local_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,6 +51,9 @@ function migrate(db: SQLite.SQLiteDatabase): void {
       state TEXT,
       timezone TEXT,
       source TEXT NOT NULL DEFAULT 'user',
+      device_type TEXT,
+      maintaining_agency TEXT,
+      source_id TEXT,
       sync_status TEXT NOT NULL DEFAULT 'pending',
       retry_count INTEGER NOT NULL DEFAULT 0,
       last_sync_error TEXT,

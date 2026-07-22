@@ -10,7 +10,8 @@
     "web": "expo start --web",
     "test": "jest",
     "test:watch": "jest --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed:intersections": "node scripts/seed-intersections.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

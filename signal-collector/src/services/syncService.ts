@@ -121,8 +121,10 @@ export async function refreshIntersectionsFromRemote(): Promise<void> {
   if (!sessionData.session) return;
   const { data, error } = await supabase
     .from('intersections')
-    .select('id, name, latitude, longitude, city, state, timezone, source, created_at')
-    .limit(500);
+    .select(
+      'id, name, latitude, longitude, city, state, timezone, source, device_type, maintaining_agency, source_id, created_at',
+    )
+    .limit(2000);
   if (!error && data) {
     upsertRemoteIntersections(data);
   }

@@ -17,8 +17,9 @@ import { getCurrentFix } from '@/services/locationService';
 import { intersectionInputSchema } from '@/validation/schemas';
 import { newUuid } from '@/utils/ids';
 import { haversineMeters, formatDistance } from '@/utils/geo';
+import { findSignalAhead } from '@/utils/signalLookup';
 import { colors, spacing } from '@/utils/theme';
-import type { GeoFix, Intersection } from '@/types/models';
+import type { ApproachDirection, GeoFix, Intersection } from '@/types/models';
 
 const FALLBACK_REGION = {
   latitude: 30.2672,
@@ -103,12 +104,25 @@ export default function IntersectionsScreen() {
   }, [pin, fix, newName, newCity, setDraftIntersection]);
 
   const choose = useCallback(
-    (intersection: Intersection) => {
-      setDraftIntersection(intersection);
+    (intersection: Intersection, suggestedDirection: ApproachDirection | null = null) => {
+      setDraftIntersection(intersection, suggestedDirection);
       router.push('/movement');
     },
     [setDraftIntersection],
   );
+
+  // Auto-detected signal: nearest within 75 m ahead of the direction of
+  // travel (or plain nearest when stationary). Used to pre-fill the session
+  // instead of manual labels.
+  const suggestion = useMemo(() => {
+    if (!fix) return null;
+    return findSignalAhead(
+      intersections,
+      fix.latitude,
+      fix.longitude,
+      fix.headingDegrees,
+    );
+  }, [fix, intersections]);
 
   return (
     <View style={styles.screen}>
@@ -124,6 +138,25 @@ export default function IntersectionsScreen() {
         {pin && <Marker coordinate={pin} pinColor="#58a6ff" title="New intersection" />}
       </MapView>
       <Text style={styles.hint}>Long-press the map to add an intersection at that point</Text>
+
+      {suggestion && (
+        <Pressable
+          style={styles.suggestion}
+          onPress={() => choose(suggestion.intersection, suggestion.approachDirection)}
+        >
+          <Text style={styles.suggestionTitle} numberOfLines={1}>
+            📍 {suggestion.intersection.name}
+          </Text>
+          <Text style={styles.suggestionMeta}>
+            {formatDistance(suggestion.distanceMeters)} away
+            {suggestion.approachDirection ? ` · ${suggestion.approachDirection}` : ''}
+            {suggestion.intersection.maintainingAgency
+              ? ` · ${suggestion.intersection.maintainingAgency}`
+              : ''}{' '}
+            — tap to use
+          </Text>
+        </Pressable>
+      )}
 
       <TextInput
         style={styles.search}
@@ -222,6 +255,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 4,
   },
+  suggestion: {
+    backgroundColor: 'rgba(88, 166, 255, 0.12)',
+    borderColor: colors.accent,
+    borderWidth: 1,
+    borderRadius: 10,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    padding: spacing.md,
+  },
+  suggestionTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
+  suggestionMeta: { color: colors.accent, fontSize: 12, marginTop: 2 },
   search: {
     backgroundColor: colors.card,
     borderColor: colors.cardBorder,

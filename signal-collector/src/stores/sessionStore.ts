@@ -37,6 +37,8 @@ interface DraftSelection {
   approachDirection: ApproachDirection | null;
   movementType: MovementType | null;
   movementDescription: string | null;
+  /** Direction suggested from the GPS heading when the intersection was auto-detected. */
+  suggestedApproachDirection: ApproachDirection | null;
 }
 
 interface SessionState {
@@ -48,7 +50,10 @@ interface SessionState {
   currentFix: GeoFix | null;
   cycleCount: number;
 
-  setDraftIntersection: (intersection: Intersection) => void;
+  setDraftIntersection: (
+    intersection: Intersection,
+    suggestedDirection?: ApproachDirection | null,
+  ) => void;
   setDraftMovement: (
     direction: ApproachDirection,
     movement: MovementType,
@@ -83,6 +88,7 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
     approachDirection: null,
     movementType: null,
     movementDescription: null,
+    suggestedApproachDirection: null,
   },
   activeSession: null,
   observations: [],
@@ -91,8 +97,14 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
   currentFix: null,
   cycleCount: 0,
 
-  setDraftIntersection: (intersection) =>
-    set((s) => ({ draft: { ...s.draft, intersection } })),
+  setDraftIntersection: (intersection, suggestedDirection = null) =>
+    set((s) => ({
+      draft: {
+        ...s.draft,
+        intersection,
+        suggestedApproachDirection: suggestedDirection,
+      },
+    })),
 
   setDraftMovement: (approachDirection, movementType, movementDescription) =>
     set((s) => ({
@@ -221,6 +233,7 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
         approachDirection: null,
         movementType: null,
         movementDescription: null,
+        suggestedApproachDirection: null,
       },
     });
     void syncNow().catch(() => {});

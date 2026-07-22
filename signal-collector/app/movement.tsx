@@ -30,10 +30,12 @@ const MOVEMENT_LABELS: Record<MovementType, string> = {
 
 export default function MovementScreen() {
   const intersection = useSessionStore((s) => s.draft.intersection);
+  const suggestedDirection = useSessionStore((s) => s.draft.suggestedApproachDirection);
   const setDraftMovement = useSessionStore((s) => s.setDraftMovement);
   const startSession = useSessionStore((s) => s.startSession);
 
-  const [direction, setDirection] = useState<ApproachDirection | null>(null);
+  // Pre-fill from the GPS-heading suggestion; the user can always override.
+  const [direction, setDirection] = useState<ApproachDirection | null>(suggestedDirection);
   const [movement, setMovement] = useState<MovementType | null>(null);
   const [description, setDescription] = useState('');
   const [starting, setStarting] = useState(false);

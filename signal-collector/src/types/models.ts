@@ -66,6 +66,12 @@ export interface Intersection {
   state: string | null;
   timezone: string | null;
   source: 'seed' | 'user' | 'import';
+  /** e.g. "Mast Arm", "Span Wire" — from GIS imports. */
+  deviceType: string | null;
+  /** e.g. "Broward County", "FDOT" — from GIS imports. */
+  maintainingAgency: string | null;
+  /** Stable upstream id (e.g. "bcgis:1234") used as the import idempotency key. */
+  sourceId: string | null;
   syncStatus: SyncStatus;
   createdAt: string;
 }

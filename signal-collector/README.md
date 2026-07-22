@@ -132,6 +132,33 @@ The commented block at the bottom of `seed.sql` creates a synthetic demo session
 (three clean cycles) — sign in once, look up your user id in `auth.users`, and run it
 with `YOUR_USER_ID` replaced.
 
+### Seeding real intersections from public GIS data (Broward County)
+
+`scripts/seed-intersections.mjs` populates the `intersections` table from the
+**Broward County Traffic Signals** layer on the county GeoHub, enriched with
+maintaining-agency info from **FDOT RCI layer 18** merged by ~30 m proximity.
+Apply migration `0003_intersection_gis_columns.sql` first, then:
+
+```bash
+# Preview without writing (also logs the source fields it discovered):
+node scripts/seed-intersections.mjs --dry-run --out preview.json
+
+# Real run (server-side only -- NEVER put the service-role key in the app):
+SUPABASE_URL=https://YOUR-PROJECT.supabase.co \
+SUPABASE_SERVICE_ROLE_KEY=... \
+npm run seed:intersections
+```
+
+Notes:
+- The county FeatureServer URL is discovered at runtime from the ArcGIS item
+  registry, and all pages are fetched past the server's `maxRecordCount`.
+  If discovery ever fails, pass `BROWARD_LAYER_URL=<layer url>` explicitly.
+- Idempotent: rows upsert on `source_id`, so re-run whenever the county
+  updates the layer. User-created intersections (no `source_id`) are untouched.
+- The app auto-suggests the nearest imported signal within 75 m ahead of the
+  direction of travel (`src/utils/signalLookup.ts`) and pre-fills the approach
+  direction from the GPS heading — labels stay editable.
+
 ## Testing on a physical phone
 
 ### Android (fastest path)

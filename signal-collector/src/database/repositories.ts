@@ -77,6 +77,9 @@ function mapIntersection(r: Row): Intersection {
     state: (r.state as string) ?? null,
     timezone: (r.timezone as string) ?? null,
     source: r.source as Intersection['source'],
+    deviceType: (r.device_type as string) ?? null,
+    maintainingAgency: (r.maintaining_agency as string) ?? null,
+    sourceId: (r.source_id as string) ?? null,
     syncStatus: r.sync_status as Intersection['syncStatus'],
     createdAt: r.created_at as string,
   };
@@ -239,6 +242,9 @@ export function insertIntersection(input: IntersectionInput): Intersection {
   });
   return {
     ...input,
+    deviceType: null,
+    maintainingAgency: null,
+    sourceId: null,
     syncStatus: 'pending',
     createdAt,
   };
@@ -266,6 +272,9 @@ export function upsertRemoteIntersections(
     state: string | null;
     timezone: string | null;
     source: string;
+    device_type: string | null;
+    maintaining_agency: string | null;
+    source_id: string | null;
     created_at: string;
   }>,
 ): void {
@@ -274,8 +283,9 @@ export function upsertRemoteIntersections(
     for (const r of rows) {
       db.runSync(
         `INSERT INTO local_intersections
-           (client_generated_id, name, latitude, longitude, city, state, timezone, source, sync_status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)
+           (client_generated_id, name, latitude, longitude, city, state, timezone, source,
+            device_type, maintaining_agency, source_id, sync_status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)
          ON CONFLICT (client_generated_id) DO UPDATE SET
            name = excluded.name,
            latitude = excluded.latitude,
@@ -283,8 +293,14 @@ export function upsertRemoteIntersections(
            city = excluded.city,
            state = excluded.state,
            timezone = excluded.timezone,
+           device_type = excluded.device_type,
+           maintaining_agency = excluded.maintaining_agency,
+           source_id = excluded.source_id,
            sync_status = 'synced'`,
-        [r.id, r.name, r.latitude, r.longitude, r.city, r.state, r.timezone, r.source, r.created_at],
+        [
+          r.id, r.name, r.latitude, r.longitude, r.city, r.state, r.timezone, r.source,
+          r.device_type, r.maintaining_agency, r.source_id, r.created_at,
+        ],
       );
     }
   });
