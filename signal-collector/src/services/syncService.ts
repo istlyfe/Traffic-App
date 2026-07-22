@@ -113,21 +113,29 @@ export async function syncNow(): Promise<SyncResult> {
   }
 }
 
+export type IntersectionRefreshResult =
+  | { ok: true; count: number }
+  | { ok: false; reason: string };
+
 /** Pull public/shared intersections into the local cache. */
-export async function refreshIntersectionsFromRemote(): Promise<void> {
+export async function refreshIntersectionsFromRemote(): Promise<IntersectionRefreshResult> {
   const supabase = getSupabase();
-  if (!supabase) return;
+  if (!supabase) {
+    return { ok: false, reason: 'Supabase not configured — add keys to .env and restart' };
+  }
   const { data: sessionData } = await supabase.auth.getSession();
-  if (!sessionData.session) return;
+  if (!sessionData.session) {
+    return { ok: false, reason: 'Not signed in — sign in from Settings to download intersections' };
+  }
   const { data, error } = await supabase
     .from('intersections')
     .select(
       'id, name, latitude, longitude, city, state, timezone, source, device_type, maintaining_agency, source_id, created_at',
     )
     .limit(2000);
-  if (!error && data) {
-    upsertRemoteIntersections(data);
-  }
+  if (error) return { ok: false, reason: error.message };
+  upsertRemoteIntersections(data ?? []);
+  return { ok: true, count: data?.length ?? 0 };
 }
 
 let netInfoUnsubscribe: (() => void) | null = null;

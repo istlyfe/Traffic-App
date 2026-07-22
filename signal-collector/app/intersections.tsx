@@ -38,6 +38,7 @@ export default function IntersectionsScreen() {
   const [newCity, setNewCity] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fetchStatus, setFetchStatus] = useState<string>('checking cloud catalog…');
 
   const reload = useCallback(() => {
     setIntersections(listIntersections(search.trim() || undefined));
@@ -49,7 +50,12 @@ export default function IntersectionsScreen() {
 
   useEffect(() => {
     void getCurrentFix().then(setFix);
-    void refreshIntersectionsFromRemote().then(reload);
+    void refreshIntersectionsFromRemote().then((result) => {
+      setFetchStatus(
+        result.ok ? `☁ ${result.count} intersections synced` : `⚠ ${result.reason}`,
+      );
+      reload();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -133,7 +139,8 @@ export default function IntersectionsScreen() {
   return (
     <View style={styles.screen}>
       <MapView style={styles.map} initialRegion={region} onLongPress={onLongPress}>
-        {sorted.map((ix) => (
+        {/* Cap markers: rendering all ~1600 imported signals stalls the map. */}
+        {sorted.slice(0, 60).map((ix) => (
           <Marker
             key={ix.clientGeneratedId}
             coordinate={{ latitude: ix.latitude, longitude: ix.longitude }}
@@ -144,6 +151,7 @@ export default function IntersectionsScreen() {
         {pin && <Marker coordinate={pin} pinColor="#58a6ff" title="New intersection" />}
       </MapView>
       <Text style={styles.hint}>Long-press the map to add an intersection at that point</Text>
+      <Text style={styles.fetchStatus}>{fetchStatus}</Text>
 
       {suggestion && (
         <Pressable
@@ -261,6 +269,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textAlign: 'center',
     paddingVertical: 4,
+  },
+  fetchStatus: {
+    color: colors.accent,
+    fontSize: 11,
+    textAlign: 'center',
+    paddingBottom: 4,
   },
   suggestion: {
     backgroundColor: 'rgba(88, 166, 255, 0.12)',
