@@ -27,6 +27,9 @@ export default function SettingsScreen() {
   const [sending, setSending] = useState(false);
   const [code, setCode] = useState('');
   const [verifying, setVerifying] = useState(false);
+  const [password, setPassword] = useState('');
+  const [signingIn, setSigningIn] = useState(false);
+  const [showEmailLink, setShowEmailLink] = useState(false);
 
   const toggleBackground = async (enabled: boolean) => {
     if (!enabled) {
@@ -83,6 +86,18 @@ export default function SettingsScreen() {
     }
   };
 
+  const signInPassword = async () => {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed.includes('@') || password.length < 6) return;
+    setSigningIn(true);
+    const ok = await auth.signInWithPassword(trimmed, password);
+    setSigningIn(false);
+    if (ok) {
+      setPassword('');
+      Alert.alert('Signed in', `You are signed in as ${trimmed}.`);
+    }
+  };
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.card}>
@@ -103,8 +118,8 @@ export default function SettingsScreen() {
         ) : (
           <>
             <Text style={styles.dim}>
-              Sign in with an email magic link to sync your data. Collection works
-              without an account; data stays on this device until you sign in.
+              Sign in to sync your data. Collection works without an account; data
+              stays on this device until you sign in.
             </Text>
             <TextInput
               style={styles.input}
@@ -115,35 +130,72 @@ export default function SettingsScreen() {
               value={email}
               onChangeText={setEmail}
             />
+
+            {/* Primary path: email + password. Needs no email delivery — create
+                the user once in the Supabase dashboard (Authentication > Users >
+                Add user, "Auto Confirm"). */}
+            <TextInput
+              style={styles.input}
+              placeholder="password"
+              placeholderTextColor={colors.textDim}
+              autoCapitalize="none"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+            />
             <Pressable
-              style={[styles.button, sending && styles.disabled]}
-              disabled={sending || !auth.configured}
-              onPress={() => void sendLink()}
+              style={[styles.button, (signingIn || !auth.configured) && styles.disabled]}
+              disabled={signingIn || !auth.configured}
+              onPress={() => void signInPassword()}
             >
               <Text style={styles.buttonLabel}>
-                {sending ? 'Sending…' : 'Send sign-in email'}
+                {signingIn ? 'Signing in…' : 'Sign in'}
               </Text>
             </Pressable>
-            {auth.magicLinkSentTo && (
+            <Text style={styles.dim}>
+              First time? Create your user in the Supabase dashboard
+              (Authentication → Users → Add user, enable “Auto Confirm”), then sign
+              in here — no confirmation email needed.
+            </Text>
+
+            <Pressable onPress={() => setShowEmailLink((v) => !v)}>
+              <Text style={styles.linkToggle}>
+                {showEmailLink ? 'Hide email-link sign-in' : 'Use an email link/code instead'}
+              </Text>
+            </Pressable>
+            {showEmailLink && (
               <>
-                <TextInput
-                  style={styles.input}
-                  placeholder="6-digit code from the email"
-                  placeholderTextColor={colors.textDim}
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  value={code}
-                  onChangeText={setCode}
-                />
                 <Pressable
-                  style={[styles.button, (verifying || code.trim().length < 6) && styles.disabled]}
-                  disabled={verifying || code.trim().length < 6}
-                  onPress={() => void verifyCode()}
+                  style={[styles.buttonOutline, sending && styles.disabled]}
+                  disabled={sending || !auth.configured}
+                  onPress={() => void sendLink()}
                 >
-                  <Text style={styles.buttonLabel}>
-                    {verifying ? 'Verifying…' : 'Verify code'}
+                  <Text style={styles.buttonOutlineLabel}>
+                    {sending ? 'Sending…' : 'Send sign-in email'}
                   </Text>
                 </Pressable>
+                {auth.magicLinkSentTo && (
+                  <>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="6-digit code from the email"
+                      placeholderTextColor={colors.textDim}
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      value={code}
+                      onChangeText={setCode}
+                    />
+                    <Pressable
+                      style={[styles.button, (verifying || code.trim().length < 6) && styles.disabled]}
+                      disabled={verifying || code.trim().length < 6}
+                      onPress={() => void verifyCode()}
+                    >
+                      <Text style={styles.buttonLabel}>
+                        {verifying ? 'Verifying…' : 'Verify code'}
+                      </Text>
+                    </Pressable>
+                  </>
+                )}
               </>
             )}
             {auth.error && <Text style={styles.warn}>{auth.error}</Text>}
@@ -287,6 +339,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonOutlineLabel: { color: colors.text, fontWeight: '700' },
+  linkToggle: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingVertical: spacing.sm,
+  },
   disabled: { opacity: 0.5 },
   stepper: { flexDirection: 'row', gap: spacing.sm },
   stepButton: {
