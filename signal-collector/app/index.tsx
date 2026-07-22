@@ -14,6 +14,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useGpsStatus } from '@/hooks/useGpsStatus';
 import { requestForegroundPermission } from '@/services/locationService';
+import { refreshIntersectionsFromRemote } from '@/services/syncService';
 import { AccuracyBadge } from '@/components/AccuracyBadge';
 import { SafetyNotice, SAFETY_TEXT } from '@/components/SafetyNotice';
 import { SyncPill } from '@/components/StatePill';
@@ -46,6 +47,7 @@ export default function HomeScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refresh();
+    await refreshIntersectionsFromRemote().catch(() => {});
     setRecent(listSessions().slice(0, 5));
     refreshCounts();
     setRefreshing(false);
