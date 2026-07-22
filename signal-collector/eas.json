@@ -8,8 +8,8 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "https://YOUR-PROJECT.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "YOUR-ANON-KEY"
+        "EXPO_PUBLIC_SUPABASE_URL": "https://ywcsjwedwpvfaujtatop.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_gizd25zRkkbcdHErvoBaqw_SwzW2t2_"
       }
     },
     "development-simulator": {
@@ -21,8 +21,8 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "https://YOUR-PROJECT.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "YOUR-ANON-KEY"
+        "EXPO_PUBLIC_SUPABASE_URL": "https://ywcsjwedwpvfaujtatop.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_gizd25zRkkbcdHErvoBaqw_SwzW2t2_"
       }
     },
     "production": {
