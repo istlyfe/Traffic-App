@@ -25,6 +25,8 @@ export default function SettingsScreen() {
   const sync = useSyncStore();
   const [email, setEmail] = useState('');
   const [sending, setSending] = useState(false);
+  const [code, setCode] = useState('');
+  const [verifying, setVerifying] = useState(false);
 
   const toggleBackground = async (enabled: boolean) => {
     if (!enabled) {
@@ -62,7 +64,22 @@ export default function SettingsScreen() {
     const ok = await auth.sendMagicLink(trimmed);
     setSending(false);
     if (ok) {
-      Alert.alert('Check your email', `A magic sign-in link was sent to ${trimmed}.`);
+      Alert.alert(
+        'Check your email',
+        `Sent to ${trimmed}. Enter the 6-digit code from the email below (the link also works on a device with the app installed).`,
+      );
+    }
+  };
+
+  const verifyCode = async () => {
+    const target = auth.magicLinkSentTo ?? email.trim().toLowerCase();
+    if (!target || code.trim().length < 6) return;
+    setVerifying(true);
+    const ok = await auth.verifyCode(target, code);
+    setVerifying(false);
+    if (ok) {
+      setCode('');
+      Alert.alert('Signed in', `You are signed in as ${target}.`);
     }
   };
 
@@ -104,9 +121,31 @@ export default function SettingsScreen() {
               onPress={() => void sendLink()}
             >
               <Text style={styles.buttonLabel}>
-                {sending ? 'Sending…' : 'Send magic link'}
+                {sending ? 'Sending…' : 'Send sign-in email'}
               </Text>
             </Pressable>
+            {auth.magicLinkSentTo && (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="6-digit code from the email"
+                  placeholderTextColor={colors.textDim}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  value={code}
+                  onChangeText={setCode}
+                />
+                <Pressable
+                  style={[styles.button, (verifying || code.trim().length < 6) && styles.disabled]}
+                  disabled={verifying || code.trim().length < 6}
+                  onPress={() => void verifyCode()}
+                >
+                  <Text style={styles.buttonLabel}>
+                    {verifying ? 'Verifying…' : 'Verify code'}
+                  </Text>
+                </Pressable>
+              </>
+            )}
             {auth.error && <Text style={styles.warn}>{auth.error}</Text>}
           </>
         )}

@@ -17,6 +17,8 @@ interface AuthState {
   error: string | null;
   init: () => Promise<void>;
   sendMagicLink: (email: string) => Promise<boolean>;
+  /** Verify the 6-digit OTP code from the sign-in email (no deep link needed). */
+  verifyCode: (email: string, code: string) => Promise<boolean>;
   handleDeepLink: (url: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -65,6 +67,22 @@ export const useAuthStore = create<AuthState>()((set) => ({
       return false;
     }
     set({ magicLinkSentTo: email, error: null });
+    return true;
+  },
+
+  verifyCode: async (email: string, code: string) => {
+    const supabase = getSupabase();
+    if (!supabase) return false;
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token: code.trim(),
+      type: 'email',
+    });
+    if (error) {
+      set({ error: error.message });
+      return false;
+    }
+    set({ error: null, magicLinkSentTo: null });
     return true;
   },
 
