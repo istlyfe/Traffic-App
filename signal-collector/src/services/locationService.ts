@@ -67,7 +67,7 @@ function persistSampleIfDue(sessionClientId: string, loc: Location.LocationObjec
 /* Background task (must be defined at module scope)                   */
 /* ------------------------------------------------------------------ */
 
-TaskManager.defineTask(BACKGROUND_LOCATION_TASK, ({ data, error }) => {
+TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (error) {
     console.warn('[background-location] task error', error.message);
     return;

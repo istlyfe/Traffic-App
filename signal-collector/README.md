@@ -24,7 +24,7 @@ an intersection.
 
 | Layer | Choice |
 |---|---|
-| Mobile | React Native + Expo (SDK 51), TypeScript, Expo Router |
+| Mobile | React Native + Expo (SDK 54), TypeScript, Expo Router |
 | Location | expo-location + expo-task-manager (opt-in background) |
 | Maps | react-native-maps |
 | Local storage | expo-sqlite (WAL) |
