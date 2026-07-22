@@ -55,7 +55,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         isAndroidForegroundServiceEnabled: true,
       },
     ],
-    'expo-sqlite',
   ],
   experiments: {
     typedRoutes: true,
