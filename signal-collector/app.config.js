@@ -1,14 +1,16 @@
-import type { ExpoConfig, ConfigContext } from 'expo/config';
-
 /**
  * SignalCollector app configuration.
+ *
+ * Plain JS (not TS) on purpose: the EAS CLI's TypeScript config loader can
+ * fail with "Cannot read properties of undefined (reading 'CommonJS')" on
+ * some Node/ts-node combos. JS sidesteps that entirely.
  *
  * Location permission strings are deliberately explicit: reviewers on both
  * app stores reject vague background-location justifications. Background
  * location is OFF by default and only started when the user opts in from
  * Settings.
  */
-export default ({ config }: ConfigContext): ExpoConfig => ({
+module.exports = ({ config }) => ({
   ...config,
   name: 'SignalCollector',
   slug: 'signal-collector',
@@ -61,7 +63,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   extra: {
     eas: {
-      projectId: process.env.EAS_PROJECT_ID,
+      projectId: 'eaa7d9f7-bea5-4341-b8e8-ac3c2b759eac',
     },
   },
+  owner: 'istlyfe',
 });
