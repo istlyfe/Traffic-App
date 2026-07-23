@@ -13,7 +13,8 @@ import { router } from 'expo-router';
 import { insertIntersection, listIntersections } from '@/database/repositories';
 import { refreshIntersectionsFromRemote } from '@/services/syncService';
 import { useSessionStore } from '@/stores/sessionStore';
-import { getCurrentFix } from '@/services/locationService';
+import { getCurrentFix, startPreviewTracking } from '@/services/locationService';
+import type { LocationSubscription } from 'expo-location';
 import { intersectionInputSchema } from '@/validation/schemas';
 import { newUuid } from '@/utils/ids';
 import { haversineMeters, formatDistance } from '@/utils/geo';
@@ -49,13 +50,25 @@ export default function IntersectionsScreen() {
   }, [reload]);
 
   useEffect(() => {
-    void getCurrentFix().then(setFix);
+    // Seed with a one-shot fix immediately, then keep it live so the nearest
+    // signal updates as you approach — no app refresh needed.
+    void getCurrentFix().then((f) => f && setFix(f));
+    let subscription: LocationSubscription | null = null;
+    let cancelled = false;
+    void startPreviewTracking(setFix).then((sub) => {
+      if (cancelled) sub?.remove();
+      else subscription = sub;
+    });
     void refreshIntersectionsFromRemote().then((result) => {
       setFetchStatus(
         result.ok ? `☁ ${result.count} intersections synced` : `⚠ ${result.reason}`,
       );
       reload();
     });
+    return () => {
+      cancelled = true;
+      subscription?.remove();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

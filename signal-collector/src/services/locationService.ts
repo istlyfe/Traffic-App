@@ -189,10 +189,31 @@ export async function getCurrentFix(): Promise<GeoFix | null> {
     const { status } = await Location.getForegroundPermissionsAsync();
     if (status !== 'granted') return null;
     const loc = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
+      accuracy: Location.Accuracy.High,
     });
     return locationToFix(loc);
   } catch {
     return null;
   }
+}
+
+/**
+ * Live high-accuracy location watch for screens that need the fix to keep
+ * up as the user moves (e.g. the intersection picker, so the nearest signal
+ * stays current without leaving and reopening the screen). Independent of a
+ * collection session; the caller must remove the returned subscription.
+ */
+export async function startPreviewTracking(
+  onFix: (fix: GeoFix) => void,
+): Promise<Location.LocationSubscription | null> {
+  const granted = await requestForegroundPermission();
+  if (!granted) return null;
+  return Location.watchPositionAsync(
+    {
+      accuracy: Location.Accuracy.BestForNavigation,
+      timeInterval: 1500,
+      distanceInterval: 2,
+    },
+    (loc) => onFix(locationToFix(loc)),
+  );
 }
