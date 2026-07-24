@@ -57,7 +57,7 @@ export default function SettingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void readLastCrash().then(setLastCrash);
+      setLastCrash(readLastCrash());
     }, []),
   );
 
@@ -344,7 +344,10 @@ export default function SettingsScreen() {
           ) : null}
           <Pressable
             style={styles.buttonOutline}
-            onPress={() => void clearLastCrash().then(() => setLastCrash(null))}
+            onPress={() => {
+              clearLastCrash();
+              setLastCrash(null);
+            }}
           >
             <Text style={styles.buttonOutlineLabel}>Clear</Text>
           </Pressable>
