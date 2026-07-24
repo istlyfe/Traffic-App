@@ -307,6 +307,156 @@ export function upsertRemoteIntersections(
 }
 
 /* ------------------------------------------------------------------ */
+/* Restore from remote (rebuild local cache after a reinstall)          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Merge the signed-in user's sessions from Supabase back into local SQLite.
+ * Remote stores intersection_id + started_at (timestamptz); local needs the
+ * denormalized intersection_name and started_at_ms, so we derive those here
+ * (name looked up from the already-synced local intersections cache).
+ * Restored rows are marked 'synced' and never re-uploaded.
+ */
+export function upsertRemoteSessions(
+  rows: Array<{
+    id: string;
+    intersection_id: string | null;
+    approach_direction: string | null;
+    movement_type: string | null;
+    movement_description: string | null;
+    started_at: string;
+    ended_at: string | null;
+    notes: string | null;
+    status: string;
+    created_at: string;
+  }>,
+): number {
+  const db = getDb();
+  let count = 0;
+  db.withTransactionSync(() => {
+    for (const r of rows) {
+      const nameRow = r.intersection_id
+        ? db.getFirstSync<{ name: string }>(
+            `SELECT name FROM local_intersections WHERE client_generated_id = ?`,
+            [r.intersection_id],
+          )
+        : null;
+      const startedAtMs = Date.parse(r.started_at) || Date.now();
+      db.runSync(
+        `INSERT INTO local_sessions
+           (client_generated_id, intersection_client_id, intersection_name, approach_direction,
+            movement_type, movement_description, started_at, started_at_ms, ended_at, notes,
+            status, sync_status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)
+         ON CONFLICT (client_generated_id) DO UPDATE SET
+           intersection_client_id = excluded.intersection_client_id,
+           intersection_name = excluded.intersection_name,
+           approach_direction = excluded.approach_direction,
+           movement_type = excluded.movement_type,
+           movement_description = excluded.movement_description,
+           ended_at = excluded.ended_at,
+           notes = excluded.notes,
+           status = excluded.status,
+           sync_status = 'synced'`,
+        [
+          r.id,
+          r.intersection_id,
+          nameRow?.name ?? 'Restored session',
+          r.approach_direction ?? 'northbound',
+          r.movement_type ?? 'unknown',
+          r.movement_description,
+          r.started_at,
+          startedAtMs,
+          r.ended_at,
+          r.notes,
+          r.status,
+          r.created_at,
+        ],
+      );
+      count += 1;
+    }
+  });
+  return count;
+}
+
+export function upsertRemoteObservations(
+  rows: Array<{
+    client_generated_id: string;
+    session_id: string;
+    state: string;
+    observed_at: string;
+    device_timestamp_ms: number;
+    latitude: number | null;
+    longitude: number | null;
+    heading_degrees: number | null;
+    speed_mps: number | null;
+    accuracy_meters: number | null;
+    altitude_meters: number | null;
+    source: string;
+    note: string | null;
+    created_at: string;
+  }>,
+): number {
+  const db = getDb();
+  let count = 0;
+  db.withTransactionSync(() => {
+    for (const r of rows) {
+      db.runSync(
+        `INSERT INTO local_observations
+           (client_generated_id, session_client_id, state, observed_at, device_timestamp_ms,
+            latitude, longitude, heading_degrees, speed_mps, accuracy_meters, altitude_meters,
+            source, note, sync_status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)
+         ON CONFLICT (client_generated_id) DO UPDATE SET
+           state = excluded.state,
+           note = excluded.note,
+           sync_status = 'synced'`,
+        [
+          r.client_generated_id, r.session_id, r.state, r.observed_at, r.device_timestamp_ms,
+          r.latitude, r.longitude, r.heading_degrees, r.speed_mps, r.accuracy_meters,
+          r.altitude_meters, r.source, r.note, r.created_at,
+        ],
+      );
+      count += 1;
+    }
+  });
+  return count;
+}
+
+export function upsertRemoteLocationSamples(
+  rows: Array<{
+    client_generated_id: string;
+    session_id: string;
+    observed_at: string;
+    latitude: number;
+    longitude: number;
+    heading_degrees: number | null;
+    speed_mps: number | null;
+    accuracy_meters: number | null;
+  }>,
+): number {
+  const db = getDb();
+  let count = 0;
+  db.withTransactionSync(() => {
+    for (const r of rows) {
+      db.runSync(
+        `INSERT INTO local_location_samples
+           (client_generated_id, session_client_id, observed_at, latitude, longitude,
+            heading_degrees, speed_mps, accuracy_meters, sync_status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'synced', ?)
+         ON CONFLICT (client_generated_id) DO NOTHING`,
+        [
+          r.client_generated_id, r.session_id, r.observed_at, r.latitude, r.longitude,
+          r.heading_degrees, r.speed_mps, r.accuracy_meters, nowIso(),
+        ],
+      );
+      count += 1;
+    }
+  });
+  return count;
+}
+
+/* ------------------------------------------------------------------ */
 /* Sessions                                                            */
 /* ------------------------------------------------------------------ */
 

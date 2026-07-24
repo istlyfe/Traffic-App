@@ -14,6 +14,9 @@ import {
   peekQueueBatch,
   pendingQueueCount,
   upsertRemoteIntersections,
+  upsertRemoteSessions,
+  upsertRemoteObservations,
+  upsertRemoteLocationSamples,
 } from '@/database/repositories';
 import type { QueueEntityType } from '@/types/models';
 
@@ -136,6 +139,56 @@ export async function refreshIntersectionsFromRemote(): Promise<IntersectionRefr
   if (error) return { ok: false, reason: error.message };
   upsertRemoteIntersections(data ?? []);
   return { ok: true, count: data?.length ?? 0 };
+}
+
+export type RestoreResult =
+  | { ok: true; sessions: number; observations: number; samples: number }
+  | { ok: false; reason: string };
+
+/**
+ * Re-download the signed-in user's own sessions, observations and location
+ * samples from Supabase into local SQLite. Used to rebuild the local cache
+ * after a reinstall or on a new device — RLS guarantees only the user's own
+ * rows come back. Safe to run repeatedly (everything upserts by id).
+ */
+export async function restoreFromRemote(): Promise<RestoreResult> {
+  const supabase = getSupabase();
+  if (!supabase) return { ok: false, reason: 'Supabase not configured' };
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!sessionData.session) return { ok: false, reason: 'Sign in first to restore your data' };
+
+  // Intersections first so session name lookups resolve.
+  await refreshIntersectionsFromRemote();
+
+  const { data: sessions, error: sErr } = await supabase
+    .from('collection_sessions')
+    .select(
+      'id, intersection_id, approach_direction, movement_type, movement_description, started_at, ended_at, notes, status, created_at',
+    )
+    .order('started_at', { ascending: false })
+    .limit(2000);
+  if (sErr) return { ok: false, reason: sErr.message };
+  const sessionCount = upsertRemoteSessions(sessions ?? []);
+
+  const { data: observations, error: oErr } = await supabase
+    .from('signal_observations')
+    .select(
+      'client_generated_id, session_id, state, observed_at, device_timestamp_ms, latitude, longitude, heading_degrees, speed_mps, accuracy_meters, altitude_meters, source, note, created_at',
+    )
+    .limit(50000);
+  if (oErr) return { ok: false, reason: oErr.message };
+  const obsCount = upsertRemoteObservations(observations ?? []);
+
+  const { data: samples, error: lErr } = await supabase
+    .from('location_samples')
+    .select(
+      'client_generated_id, session_id, observed_at, latitude, longitude, heading_degrees, speed_mps, accuracy_meters',
+    )
+    .limit(100000);
+  if (lErr) return { ok: false, reason: lErr.message };
+  const sampleCount = upsertRemoteLocationSamples(samples ?? []);
+
+  return { ok: true, sessions: sessionCount, observations: obsCount, samples: sampleCount };
 }
 
 let netInfoUnsubscribe: (() => void) | null = null;

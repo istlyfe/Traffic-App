@@ -17,6 +17,7 @@ import {
   requestBackgroundPermission,
   stopBackgroundTracking,
 } from '@/services/locationService';
+import { restoreFromRemote } from '@/services/syncService';
 import { readLastCrash, clearLastCrash, type CrashRecord } from '@/utils/crashLog';
 import { SAFETY_TEXT } from '@/components/SafetyNotice';
 import { colors, spacing } from '@/utils/theme';
@@ -33,6 +34,26 @@ export default function SettingsScreen() {
   const [signingIn, setSigningIn] = useState(false);
   const [showEmailLink, setShowEmailLink] = useState(false);
   const [lastCrash, setLastCrash] = useState<CrashRecord | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const refreshCounts = useSyncStore((s) => s.refreshCounts);
+
+  const runRestore = useCallback(
+    async (announce: boolean) => {
+      setRestoring(true);
+      const result = await restoreFromRemote();
+      setRestoring(false);
+      refreshCounts();
+      if (result.ok && announce) {
+        Alert.alert(
+          'Restore complete',
+          `${result.sessions} sessions, ${result.observations} observations and ${result.samples} GPS samples are back on this device.`,
+        );
+      } else if (!result.ok && announce) {
+        Alert.alert('Restore failed', result.reason);
+      }
+    },
+    [refreshCounts],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -91,7 +112,8 @@ export default function SettingsScreen() {
     setVerifying(false);
     if (ok) {
       setCode('');
-      Alert.alert('Signed in', `You are signed in as ${target}.`);
+      // Pull the user's own data back onto this device automatically.
+      void runRestore(true);
     }
   };
 
@@ -103,7 +125,7 @@ export default function SettingsScreen() {
     setSigningIn(false);
     if (ok) {
       setPassword('');
-      Alert.alert('Signed in', `You are signed in as ${trimmed}.`);
+      void runRestore(true);
     }
   };
 
@@ -120,6 +142,19 @@ export default function SettingsScreen() {
         {auth.email ? (
           <>
             <Text style={styles.value}>Signed in as {auth.email}</Text>
+            <Pressable
+              style={[styles.button, restoring && styles.disabled]}
+              disabled={restoring}
+              onPress={() => void runRestore(true)}
+            >
+              <Text style={styles.buttonLabel}>
+                {restoring ? 'Restoring…' : 'Restore my data from cloud'}
+              </Text>
+            </Pressable>
+            <Text style={styles.dim}>
+              Re-downloads your sessions, observations and GPS paths onto this device
+              (e.g. after reinstalling the app).
+            </Text>
             <Pressable style={styles.buttonOutline} onPress={() => void auth.signOut()}>
               <Text style={styles.buttonOutlineLabel}>Sign out</Text>
             </Pressable>
