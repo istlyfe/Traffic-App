@@ -18,6 +18,18 @@ module.exports = ({ config }) => ({
   orientation: 'portrait',
   scheme: 'signalcollector',
   userInterfaceStyle: 'dark',
+  /**
+   * Opt out of the New Architecture (default-on in SDK 54).
+   *
+   * react-native-maps renders through Fabric's legacy view-manager interop
+   * layer, whose finalizeUpdates: throws NSRangeException when a map's
+   * marker children are inserted/reordered — crashing the app outright
+   * (confirmed in a device crash log). The legacy architecture uses
+   * react-native-maps' native view manager directly and does not have this
+   * failure mode. Revisit when react-native-maps ships a real Fabric
+   * component (the legacy architecture is removed in SDK 55).
+   */
+  newArchEnabled: false,
   ios: {
     bundleIdentifier: 'com.signalcollector.app',
     supportsTablet: false,

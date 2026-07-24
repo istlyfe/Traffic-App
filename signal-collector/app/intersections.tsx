@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import MapView, { Marker, type LongPressEvent } from 'react-native-maps';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { insertIntersection, listIntersections } from '@/database/repositories';
 import { refreshIntersectionsFromRemote } from '@/services/syncService';
 import { useSessionStore } from '@/stores/sessionStore';
@@ -50,27 +50,33 @@ export default function IntersectionsScreen() {
   }, [reload]);
 
   useEffect(() => {
-    // Seed with a one-shot fix immediately, then keep it live so the nearest
-    // signal updates as you approach — no app refresh needed.
-    void getCurrentFix().then((f) => f && setFix(f));
-    let subscription: LocationSubscription | null = null;
-    let cancelled = false;
-    void startPreviewTracking(setFix).then((sub) => {
-      if (cancelled) sub?.remove();
-      else subscription = sub;
-    });
     void refreshIntersectionsFromRemote().then((result) => {
       setFetchStatus(
         result.ok ? `☁ ${result.count} intersections synced` : `⚠ ${result.reason}`,
       );
       reload();
     });
-    return () => {
-      cancelled = true;
-      subscription?.remove();
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Live location ONLY while this screen is focused. useEffect would keep the
+  // watcher (and the map re-renders it drives) running while the screen sits
+  // mounted underneath /collect, which crashed the native map view.
+  useFocusEffect(
+    useCallback(() => {
+      void getCurrentFix().then((f) => f && setFix(f));
+      let subscription: LocationSubscription | null = null;
+      let cancelled = false;
+      void startPreviewTracking(setFix).then((sub) => {
+        if (cancelled) sub?.remove();
+        else subscription = sub;
+      });
+      return () => {
+        cancelled = true;
+        subscription?.remove();
+      };
+    }, []),
+  );
 
   const sorted = useMemo(() => {
     if (!fix) return intersections;
@@ -86,6 +92,35 @@ export default function IntersectionsScreen() {
   const region = fix
     ? { latitude: fix.latitude, longitude: fix.longitude, latitudeDelta: 0.02, longitudeDelta: 0.02 }
     : FALLBACK_REGION;
+
+  /**
+   * Map markers, deliberately decoupled from the distance-sorted list.
+   *
+   * Re-ordering a native map view's children on every GPS fix is what
+   * crashed the app (NSRangeException inside the legacy view-manager
+   * interop's finalizeUpdates:). So: pick the nearby set only when the user
+   * has moved into a new ~200 m bucket, and always render in a stable id
+   * order so the native child list changes as little as possible.
+   */
+  const anchorLat = fix ? Math.round(fix.latitude * 500) / 500 : null;
+  const anchorLng = fix ? Math.round(fix.longitude * 500) / 500 : null;
+
+  const markers = useMemo(() => {
+    const byId = (a: Intersection, b: Intersection) =>
+      a.clientGeneratedId.localeCompare(b.clientGeneratedId);
+    if (anchorLat == null || anchorLng == null) {
+      return [...intersections].slice(0, 40).sort(byId);
+    }
+    return [...intersections]
+      .map((ix) => ({
+        ix,
+        dist: haversineMeters(anchorLat, anchorLng, ix.latitude, ix.longitude),
+      }))
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 40)
+      .map((entry) => entry.ix)
+      .sort(byId);
+  }, [intersections, anchorLat, anchorLng]);
 
   const onLongPress = useCallback((event: LongPressEvent) => {
     setPin(event.nativeEvent.coordinate);
@@ -152,8 +187,8 @@ export default function IntersectionsScreen() {
   return (
     <View style={styles.screen}>
       <MapView style={styles.map} initialRegion={region} onLongPress={onLongPress}>
-        {/* Cap markers: rendering all ~1600 imported signals stalls the map. */}
-        {sorted.slice(0, 60).map((ix) => (
+        {/* Stable, id-ordered, distance-bucketed set — see `markers` above. */}
+        {markers.map((ix) => (
           <Marker
             key={ix.clientGeneratedId}
             coordinate={{ latitude: ix.latitude, longitude: ix.longitude }}
