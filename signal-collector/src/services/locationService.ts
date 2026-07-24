@@ -44,23 +44,30 @@ export function locationToFix(loc: Location.LocationObject): GeoFix {
 }
 
 function persistSampleIfDue(sessionClientId: string, loc: Location.LocationObject): void {
-  const nowMs = loc.timestamp;
-  const { latitude, longitude } = loc.coords;
-  if (!shouldRecordSample(sampleGate, latitude, longitude, nowMs)) return;
-  insertLocationSample({
-    clientGeneratedId: newUuid(),
-    sessionClientId,
-    observedAt: msToIso(nowMs),
-    latitude,
-    longitude,
-    headingDegrees:
-      loc.coords.heading != null && loc.coords.heading >= 0 ? loc.coords.heading : null,
-    speedMps: loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed : null,
-    accuracyMeters: loc.coords.accuracy ?? null,
-  });
-  sampleGate.lastLat = latitude;
-  sampleGate.lastLon = longitude;
-  sampleGate.lastWrittenMs = nowMs;
+  // Guarded: this runs inside a native location callback, so an uncaught
+  // throw here (e.g. a transient SQLite error) would crash the whole app in
+  // a production build rather than surface anywhere.
+  try {
+    const nowMs = loc.timestamp;
+    const { latitude, longitude } = loc.coords;
+    if (!shouldRecordSample(sampleGate, latitude, longitude, nowMs)) return;
+    insertLocationSample({
+      clientGeneratedId: newUuid(),
+      sessionClientId,
+      observedAt: msToIso(nowMs),
+      latitude,
+      longitude,
+      headingDegrees:
+        loc.coords.heading != null && loc.coords.heading >= 0 ? loc.coords.heading : null,
+      speedMps: loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed : null,
+      accuracyMeters: loc.coords.accuracy ?? null,
+    });
+    sampleGate.lastLat = latitude;
+    sampleGate.lastLon = longitude;
+    sampleGate.lastWrittenMs = nowMs;
+  } catch (err) {
+    console.warn('[location] persistSampleIfDue failed', err);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -122,15 +129,23 @@ export async function startForegroundTracking(
   if (!granted) return false;
   resetGate();
   foregroundSubscription?.remove();
+  // High (not BestForNavigation) at ~2s: BestForNavigation keeps the GPS at
+  // max power continuously, which on a long stationary session can push iOS
+  // to terminate the app for resource use. High accuracy is plenty for
+  // recording where an observation was made.
   foregroundSubscription = await Location.watchPositionAsync(
     {
-      accuracy: Location.Accuracy.BestForNavigation,
-      timeInterval: 1000,
-      distanceInterval: 1,
+      accuracy: Location.Accuracy.High,
+      timeInterval: 2000,
+      distanceInterval: 2,
     },
     (loc) => {
-      onFix(locationToFix(loc));
-      persistSampleIfDue(sessionClientId, loc);
+      try {
+        onFix(locationToFix(loc));
+        persistSampleIfDue(sessionClientId, loc);
+      } catch (err) {
+        console.warn('[location] foreground callback failed', err);
+      }
     },
   );
   return true;
@@ -210,10 +225,16 @@ export async function startPreviewTracking(
   if (!granted) return null;
   return Location.watchPositionAsync(
     {
-      accuracy: Location.Accuracy.BestForNavigation,
+      accuracy: Location.Accuracy.High,
       timeInterval: 1500,
       distanceInterval: 2,
     },
-    (loc) => onFix(locationToFix(loc)),
+    (loc) => {
+      try {
+        onFix(locationToFix(loc));
+      } catch (err) {
+        console.warn('[location] preview callback failed', err);
+      }
+    },
   );
 }

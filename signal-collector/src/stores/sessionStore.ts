@@ -164,17 +164,21 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
    * debounce gate.
    */
   recordTap: (state, rawTimestampMs) => {
-    const { activeSession, lastAcceptedTapMs, currentFix } = get();
-    if (!activeSession) return { accepted: false, reason: 'debounced' as const };
+    try {
+      const { activeSession, lastAcceptedTapMs, currentFix } = get();
+      if (!activeSession) return { accepted: false, reason: 'debounced' as const };
 
-    const debounceMs = useSettingsStore.getState().debounceMs;
-    const evaluation = evaluateTap(rawTimestampMs, lastAcceptedTapMs, debounceMs);
-    if (!evaluation.accepted) {
-      return { accepted: false, reason: evaluation.reason };
-    }
+      const debounceMs = useSettingsStore.getState().debounceMs;
+      const evaluation = evaluateTap(rawTimestampMs, lastAcceptedTapMs, debounceMs);
+      if (!evaluation.accepted) {
+        return { accepted: false, reason: evaluation.reason };
+      }
 
-    const input = observationInputSchema.parse(
-      buildObservationInput({
+      // safeParse (not parse): a fix with an out-of-range value must never
+      // throw out of the press handler and crash the app mid-session. If the
+      // fix is invalid we still record the observation without coordinates —
+      // never lose the tap.
+      const built = buildObservationInput({
         sessionClientId: activeSession.clientGeneratedId,
         state,
         rawTimestampMs: evaluation.rawTimestampMs,
@@ -188,18 +192,39 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
               altitudeMeters: currentFix.altitudeMeters,
             }
           : null,
-      }),
-    );
-    // 1. Persist locally first -- the UI never waits on the network.
-    insertObservation(input);
-    // 2. Update UI state synchronously from SQLite.
-    set({
-      lastAcceptedTapMs: evaluation.rawTimestampMs,
-      ...recomputeDerived(activeSession.clientGeneratedId),
-    });
-    // 3. Fire-and-forget background sync; failures stay in the queue.
-    void syncNow().catch(() => {});
-    return { accepted: true, reason: 'ok' as const };
+      });
+      let parsed = observationInputSchema.safeParse(built);
+      if (!parsed.success) {
+        // Retry with coordinates stripped so a bad GPS reading can't block it.
+        parsed = observationInputSchema.safeParse({
+          ...built,
+          latitude: null,
+          longitude: null,
+          headingDegrees: null,
+          speedMps: null,
+          accuracyMeters: null,
+          altitudeMeters: null,
+        });
+      }
+      if (!parsed.success) {
+        console.warn('[recordTap] validation failed', parsed.error.issues[0]?.message);
+        return { accepted: false, reason: 'debounced' as const };
+      }
+
+      // 1. Persist locally first -- the UI never waits on the network.
+      insertObservation(parsed.data);
+      // 2. Update UI state synchronously from SQLite.
+      set({
+        lastAcceptedTapMs: evaluation.rawTimestampMs,
+        ...recomputeDerived(activeSession.clientGeneratedId),
+      });
+      // 3. Fire-and-forget background sync; failures stay in the queue.
+      void syncNow().catch(() => {});
+      return { accepted: true, reason: 'ok' as const };
+    } catch (err) {
+      console.warn('[recordTap] failed', err);
+      return { accepted: false, reason: 'debounced' as const };
+    }
   },
 
   undoLast: () => {

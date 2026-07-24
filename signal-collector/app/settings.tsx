@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useSyncStore } from '@/stores/syncStore';
@@ -16,6 +17,7 @@ import {
   requestBackgroundPermission,
   stopBackgroundTracking,
 } from '@/services/locationService';
+import { readLastCrash, clearLastCrash, type CrashRecord } from '@/utils/crashLog';
 import { SAFETY_TEXT } from '@/components/SafetyNotice';
 import { colors, spacing } from '@/utils/theme';
 
@@ -30,6 +32,13 @@ export default function SettingsScreen() {
   const [password, setPassword] = useState('');
   const [signingIn, setSigningIn] = useState(false);
   const [showEmailLink, setShowEmailLink] = useState(false);
+  const [lastCrash, setLastCrash] = useState<CrashRecord | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      void readLastCrash().then(setLastCrash);
+    }, []),
+  );
 
   const toggleBackground = async (enabled: boolean) => {
     if (!enabled) {
@@ -286,6 +295,27 @@ export default function SettingsScreen() {
         </Pressable>
       </View>
 
+      {lastCrash && (
+        <View style={[styles.card, styles.crashCard]}>
+          <Text style={styles.cardTitle}>Last crash</Text>
+          <Text style={styles.dim}>{new Date(lastCrash.at).toLocaleString()}</Text>
+          <Text style={styles.crashMessage} selectable>
+            {lastCrash.message}
+          </Text>
+          {lastCrash.stack ? (
+            <Text style={styles.crashStack} selectable>
+              {lastCrash.stack.split('\n').slice(0, 12).join('\n')}
+            </Text>
+          ) : null}
+          <Pressable
+            style={styles.buttonOutline}
+            onPress={() => void clearLastCrash().then(() => setLastCrash(null))}
+          >
+            <Text style={styles.buttonOutlineLabel}>Clear</Text>
+          </Pressable>
+        </View>
+      )}
+
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Safety</Text>
         <Text style={styles.dim}>{SAFETY_TEXT}</Text>
@@ -345,6 +375,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     paddingVertical: spacing.sm,
+  },
+  crashCard: { borderColor: colors.danger },
+  crashMessage: {
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  crashStack: {
+    color: colors.textDim,
+    fontSize: 10,
+    fontFamily: 'Courier',
+    marginBottom: spacing.sm,
   },
   disabled: { opacity: 0.5 },
   stepper: { flexDirection: 'row', gap: spacing.sm },

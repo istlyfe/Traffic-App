@@ -11,7 +11,12 @@ import { useAuthStore } from '@/stores/authStore';
 import { useSyncStore } from '@/stores/syncStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { refreshIntersectionsFromRemote } from '@/services/syncService';
+import { installGlobalErrorHandler } from '@/utils/crashLog';
 import { colors } from '@/utils/theme';
+
+// Capture uncaught JS errors (incl. those in async callbacks) so they can be
+// reviewed in Settings after a production crash.
+installGlobalErrorHandler();
 
 // Ensure schema exists before any screen renders. Guarded so a migration
 // failure surfaces in the ErrorBoundary instead of crashing at import time.
