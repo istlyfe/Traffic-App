@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trading Dashboard</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --text:#e6edf3; --muted:#8b949e;
+          --ok:#3fb950; --warn:#d29922; --breach:#f85149; --pass:#58a6ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--line); }
+  h1 { font-size:18px; margin:0; }
+  .meta { color:var(--muted); font-size:12px; }
+  .banner { margin:12px 20px 0; padding:8px 12px; border-radius:6px; font-size:13px; }
+  .banner.mock { background:#1f2a3a; color:var(--pass); } .banner.err { background:#3a1f1f; color:var(--breach); }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; padding:16px 20px; }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .kpi b { display:block; font-size:22px; font-variant-numeric:tabular-nums; } .kpi span { color:var(--muted); font-size:12px; }
+  .tabs { display:flex; gap:6px; padding:0 20px; }
+  .tabs button { background:none; border:1px solid var(--line); color:var(--muted); padding:6px 12px; border-radius:16px; cursor:pointer; }
+  .tabs button.on { color:var(--text); border-color:var(--text); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; padding:16px 20px 40px; }
+  .card { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--ok); border-radius:8px; padding:14px; }
+  .card.warn { border-left-color:var(--warn); } .card.breach { border-left-color:var(--breach); } .card.pass { border-left-color:var(--pass); }
+  .top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .name { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tag { font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid var(--line); color:var(--muted); text-transform:uppercase; }
+  .row { display:flex; justify-content:space-between; margin-top:8px; font-variant-numeric:tabular-nums; }
+  .big { font-size:20px; font-weight:600; }
+  .pos { color:var(--ok); } .neg { color:var(--breach); }
+  .bar { height:6px; background:var(--line); border-radius:3px; margin-top:4px; overflow:hidden; }
+  .bar i { display:block; height:100%; }
+  .lbl { color:var(--muted); font-size:12px; margin-top:10px; display:flex; justify-content:space-between; }
+  ul { list-style:none; padding:0; margin:10px 0 0; border-top:1px solid var(--line); }
+  li { display:flex; gap:8px; align-items:center; padding:5px 0; font-size:12px; }
+  li .dot { width:8px; height:8px; border-radius:50%; flex:none; }
+  li .d { color:var(--muted); margin-left:auto; text-align:right; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Trading Dashboard</h1>
+  <div class="meta" id="meta">Loading…</div>
+</header>
+<div id="banner"></div>
+<section class="kpis" id="kpis"></section>
+<nav class="tabs" id="tabs"></nav>
+<main class="grid" id="grid"></main>
+<script>
+const COLORS = { ok:'var(--ok)', warn:'var(--warn)', breach:'var(--breach)', pass:'var(--pass)' };
+const RANK = { breach:0, warn:1, pass:2, ok:3 };
+let filter = 'all', data = null;
+const usd = (n, sign) => (n < 0 ? '-$' : sign && n > 0 ? '+$' : '$') + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 });
+const cls = (n) => n > 0 ? 'pos' : n < 0 ? 'neg' : '';
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+
+function render() {
+  if (!data) return;
+  const all = data.accounts;
+  document.getElementById('meta').textContent =
+    `Trade date ${data.tradeDate || '—'} · updated ${data.updatedAt ? new Date(data.updatedAt).toLocaleTimeString() : '—'}`;
+  document.getElementById('banner').innerHTML =
+    (data.error ? `<div class="banner err">⚠ ${esc(data.error)}</div>` : '') +
+    (data.mock ? `<div class="banner mock">Showing mock data — add Tradovate credentials to .env to go live.</div>` : '');
+
+  const count = (s) => all.filter((a) => a.status === s).length;
+  const kpis = [
+    ['Accounts', all.length, `${all.filter(a=>a.rules.type!=='eval').length} funded · ${all.filter(a=>a.rules.type==='eval').length} evals`],
+    ['Day P&L', usd(all.reduce((s,a)=>s+a.dayPnL,0), true), 'all accounts'],
+    ['Total profit', usd(all.reduce((s,a)=>s+a.totalProfit,0), true), 'vs starting balances'],
+    ['Breaches', count('breach'), 'rule violated'],
+    ['Warnings', count('warn'), 'near a limit'],
+    ['Evals passed', count('pass'), 'target hit'],
+  ];
+  document.getElementById('kpis').innerHTML = kpis.map(([t,v,s]) => `<div class="kpi"><span>${t}</span><b>${v}</b><span>${s}</span></div>`).join('');
+
+  const tabs = [['all','All'],['funded','Funded'],['eval','Evals'],['alerts','Alerts']];
+  document.getElementById('tabs').innerHTML = tabs.map(([k,l]) => `<button data-k="${k}" class="${filter===k?'on':''}">${l}</button>`).join('');
+
+  const shown = all.filter((a) => filter === 'all' ? true : filter === 'alerts' ? ['warn','breach'].includes(a.status)
+      : filter === 'eval' ? a.rules.type === 'eval' : a.rules.type !== 'eval')
+    .sort((a, b) => RANK[a.status] - RANK[b.status] || a.ddBuffer - b.ddBuffer);
+
+  document.getElementById('grid').innerHTML = shown.map((a) => {
+    const ddColor = a.ddUsedPct >= 100 ? COLORS.breach : a.ddUsedPct >= (a.rules.warnAtPct ?? 70) ? COLORS.warn : COLORS.ok;
+    return `<div class="card ${a.status}">
+      <div class="top"><span class="name" title="${esc(a.name)}">${esc(a.name)}</span>
+        <span class="tag">${esc(a.rules.firm || '')} ${a.rules.type === 'eval' ? 'Eval' : 'Funded'}</span></div>
+      <div class="row"><span class="big">${usd(a.netLiq)}</span><span class="big ${cls(a.dayPnL)}">${usd(a.dayPnL, true)}</span></div>
+      <div class="row meta"><span>Net liq · open ${usd(a.openPnL, true)}</span><span>today</span></div>
+      <div class="lbl"><span>Drawdown used</span><span>${usd(a.ddBuffer)} to floor</span></div>
+      <div class="bar"><i style="width:${a.ddUsedPct}%;background:${ddColor}"></i></div>
+      ${a.targetPct != null ? `<div class="lbl"><span>Profit target</span><span>${a.targetPct.toFixed(0)}%</span></div>
+      <div class="bar"><i style="width:${a.targetPct}%;background:var(--pass)"></i></div>` : ''}
+      <ul>${a.checks.map((c) => `<li><span class="dot" style="background:${COLORS[c.level]}"></span>${c.label}<span class="d">${esc(c.detail)}</span></li>`).join('')}</ul>
+    </div>`;
+  }).join('') || '<p class="meta">No accounts in this view.</p>';
+}
+
+document.getElementById('tabs').addEventListener('click', (e) => {
+  if (e.target.dataset.k) { filter = e.target.dataset.k; render(); }
+});
+async function load() {
+  try { data = await (await fetch('/api/status')).json(); render(); }
+  catch (e) { document.getElementById('meta').textContent = 'Server unreachable'; }
+}
+load(); setInterval(load, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "_comment": "One entry per Tradovate account name (as shown in Tradovate). Unlisted accounts use 'defaults'. Money in USD.",
+  "defaults": {
+    "type": "funded",
+    "firm": "Apex",
+    "startingBalance": 50000,
+    "trailingDrawdown": 2500,
+    "drawdownMode": "intraday",
+    "drawdownLocksAt": 50100,
+    "dailyLossLimit": null,
+    "profitTarget": null,
+    "maxContracts": 10,
+    "consistencyPct": 30,
+    "minTradingDays": null,
+    "warnAtPct": 70
+  },
+  "accounts": {
+    "APEX-12345-01": { "type": "eval", "profitTarget": 3000, "minTradingDays": 1, "consistencyPct": null },
+    "APEX-12345-02": { "type": "funded" }
+  }
+}
