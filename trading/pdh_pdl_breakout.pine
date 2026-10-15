@@ -1,18 +1,27 @@
 //@version=6
-strategy("PDH/PDL Breakout (NQ) - time filter + stop after loss", overlay=true,
+strategy("PDH/PDL Breakout (NQ) - time filter + trailing exits", overlay=true,
      pyramiding=0, initial_capital=50000, default_qty_type=strategy.fixed, default_qty_value=1,
      commission_type=strategy.commission.cash_per_contract, commission_value=0.75, slippage=1,
      process_orders_on_close=false)
 
 // ---------- Inputs ----------
-atrMult      = input.float(0.5,  "Stop & target (x daily range ATR)", step=0.1)
+atrMult      = input.float(0.5,  "Initial stop (x daily range ATR)", step=0.1)
 atrLen       = input.int(14,     "Daily range ATR length")
 levelSess    = input.session("0900-1600", "Session used for prior-day high/low")
 tradeSess    = input.session("0930-1130", "Entry window (time filter)")
 flatTime     = input.session("1555-1600", "Flatten window")
 maxTrades    = input.int(2,      "Max trades per day", minval=1)
 stopAfterLoss= input.bool(true,  "Stop trading for the day after one loss")
+
+exitMode     = input.string("Activated trail", "Exit mode",
+     options=["Fixed target", "Trail from entry", "Activated trail"], group="Exits")
+fixedTpPts   = input.float(125,  "Fixed target (pts) - 'Fixed target' mode; 0 = use ATR",  group="Exits")
+trailFromPts = input.float(50,   "Trail distance (pts) - 'Trail from entry' mode",         group="Exits")
+activatePts  = input.float(50,   "Activate trail after +pts - 'Activated trail' mode",     group="Exits")
+actTrailPts  = input.float(25,   "Trail distance (pts) - 'Activated trail' mode",          group="Exits")
 tz           = "America/New_York"
+
+toTicks(pts) => math.round(pts / syminfo.mintick)
 
 // ---------- Prior-day high / low built from the session ----------
 inLvl   = not na(time(timeframe.period, levelSess, tz))
@@ -54,7 +63,6 @@ if newDay
     longUsed    := false
     shortUsed   := false
 
-// detect newly closed trades
 if strategy.closedtrades > closedSeen
     for i = closedSeen to strategy.closedtrades - 1
         if strategy.closedtrades.profit(i) < 0
@@ -76,7 +84,6 @@ else
     strategy.cancel("Long")
     strategy.cancel("Short")
 
-// mark fills
 if strategy.position_size > 0 and strategy.position_size[1] == 0
     longUsed := true
     tradesToday += 1
@@ -86,13 +93,24 @@ if strategy.position_size < 0 and strategy.position_size[1] == 0
     tradesToday += 1
     strategy.cancel("Long")
 
-// brackets: fixed stop / target = atrMult x daily range ATR from entry
-if strategy.position_size > 0
-    e = strategy.position_avg_price
-    strategy.exit("L-exit", "Long", stop=e - risk, limit=e + risk)
-if strategy.position_size < 0
-    e = strategy.position_avg_price
-    strategy.exit("S-exit", "Short", stop=e + risk, limit=e - risk)
+// ---------- Exits ----------
+// Fixed target   : stop = ATR stop, target = fixedTpPts (or ATR if 0)
+// Trail from entry: initial stop = trailFromPts, trails immediately by trailFromPts
+// Activated trail : stop = ATR stop; once +activatePts, trail by actTrailPts
+if strategy.position_size != 0
+    e    = strategy.position_avg_price
+    dir  = strategy.position_size > 0 ? 1 : -1
+    id   = dir == 1 ? "Long" : "Short"
+    xid  = dir == 1 ? "L-exit" : "S-exit"
+    if exitMode == "Fixed target"
+        tp = fixedTpPts > 0 ? fixedTpPts : risk
+        strategy.exit(xid, id, stop=e - dir * risk, limit=e + dir * tp)
+    else if exitMode == "Trail from entry"
+        strategy.exit(xid, id, stop=e - dir * trailFromPts,
+             trail_points=0, trail_offset=toTicks(trailFromPts))
+    else
+        strategy.exit(xid, id, stop=e - dir * risk,
+             trail_points=toTicks(activatePts), trail_offset=toTicks(actTrailPts))
 
 if inFlat
     strategy.close_all("EOD flat")
