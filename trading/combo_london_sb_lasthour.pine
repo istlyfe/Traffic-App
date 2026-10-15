@@ -1,0 +1,181 @@
+//@version=6
+strategy("NQ Combo: London BO + Silver Bullet 10am + Last Hour", overlay=true,
+     pyramiding=0, initial_capital=50000, default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.75, slippage=1,
+     process_orders_on_close=false)
+
+// Designed for a 5-minute NQ1!/MNQ1! chart (Silver Bullet logic assumes 5m bars).
+// TradingView nets positions, so a module only enters when the strategy is flat.
+
+tz = "America/New_York"
+// ---------- Module switches ----------
+useLon = input.bool(true, "1) London range breakout (9:30-11:30)", group="Modules")
+useSB  = input.bool(true, "2) Silver Bullet 10:00-11:00 (5m)",      group="Modules")
+useLH  = input.bool(true, "3) Last-hour momentum (15:00-15:55)",    group="Modules")
+
+// ---------- London inputs ----------
+londonSess = input.session("0300-0930", "London range session", group="London")
+lonTrade   = input.session("0930-1130", "Entry window",         group="London")
+atrLen     = input.int(14,    "Daily RTH range ATR length",     group="London")
+lonStopX   = input.float(0.5, "Stop (x ATR)", step=0.05,         group="London")
+lonRR      = input.float(2.0, "Target (R)",   step=0.25,         group="London")
+
+// ---------- Silver Bullet inputs ----------
+sbSess    = input.session("1000-1100", "Window",              group="Silver Bullet")
+sbMinFvg  = input.float(4.0,  "Min FVG size (pts)",            group="Silver Bullet")
+sbMaxRisk = input.float(40.0, "Max stop distance (pts)",       group="Silver Bullet")
+sbRR      = input.float(2.0,  "Target (R)", step=0.25,         group="Silver Bullet")
+sbMaxBars = input.int(24,     "Max hold (bars)",               group="Silver Bullet")
+
+// ---------- Last-hour inputs ----------
+lhEntryBar = input.session("1455-1500", "Signal bar (enter next bar open)", group="Last hour")
+
+// ---------- Common ----------
+rthSess  = input.session("0930-1600", "RTH session", group="Common")
+flatSess = input.session("1555-1600", "Flatten window", group="Common")
+dailyLossUsd = input.float(600, "Daily loss limit $ (0 = off)", group="Common")
+
+inSess(s) => not na(time(timeframe.period, s, tz))
+newDay = timeframe.change("D")   // CME session rolls at 18:00 ET
+
+// ---------- Daily state ----------
+var float dayStartEq = na
+var float lonH = na
+var float lonL = na
+var float rthH = na
+var float rthL = na
+var float prevRthClose = na
+var float lastRthClose = na
+var float close959 = na
+var array<float> ranges = array.new_float()
+var bool lonDone = false
+var bool sbDone  = false
+var bool lhDone  = false
+
+if newDay
+    if not na(rthH)
+        array.push(ranges, rthH - rthL)
+        if array.size(ranges) > atrLen
+            array.shift(ranges)
+    prevRthClose := lastRthClose
+    lonH := na
+    lonL := na
+    rthH := na
+    rthL := na
+    close959 := na
+    lonDone := false
+    sbDone  := false
+    lhDone  := false
+    dayStartEq := strategy.equity
+
+if inSess(londonSess)
+    lonH := na(lonH) ? high : math.max(lonH, high)
+    lonL := na(lonL) ? low  : math.min(lonL, low)
+if inSess(rthSess)
+    rthH := na(rthH) ? high : math.max(rthH, high)
+    rthL := na(rthL) ? low  : math.min(rthL, low)
+    lastRthClose := close
+if inSess("0955-1000")
+    close959 := close
+
+atr      = array.size(ranges) == atrLen ? array.avg(ranges) : na
+flat     = strategy.position_size == 0
+lossHit  = dailyLossUsd > 0 and not na(dayStartEq) and strategy.equity - dayStartEq <= -dailyLossUsd
+
+// ================= 1) London range breakout =================
+lonRisk = atr * lonStopX
+lonOk = useLon and inSess(lonTrade) and not lonDone and flat and not lossHit and not na(lonRisk) and not na(lonH)
+if lonOk
+    if close < lonH
+        strategy.entry("LON L", strategy.long, stop=lonH)
+    if close > lonL
+        strategy.entry("LON S", strategy.short, stop=lonL)
+else
+    strategy.cancel("LON L")
+    strategy.cancel("LON S")
+if strategy.position_size != 0 and strategy.opentrades > 0
+    eid = strategy.opentrades.entry_id(0)
+    if eid == "LON L" or eid == "LON S"
+        lonDone := true
+        e = strategy.position_avg_price
+        d = eid == "LON L" ? 1 : -1
+        strategy.exit("LON X", eid, stop=e - d * lonRisk, limit=e + d * lonRR * lonRisk)
+
+// ================= 2) Silver Bullet (10:00-11:00, 5m) =================
+// Sweep: one of the last 2 bars took out the low/high of the 3 bars before, then a FVG forms.
+prevLow3  = ta.lowest(low[3], 3)
+prevHigh3 = ta.highest(high[3], 3)
+swingLow  = ta.lowest(low[1], 3)
+swingHigh = ta.highest(high[1], 3)
+bullFvg = low - high[2] >= sbMinFvg and swingLow < prevLow3
+bearFvg = low[2] - high >= sbMinFvg and swingHigh > prevHigh3
+
+var float sbEntry = na
+var float sbStop  = na
+var int   sbDir   = 0
+var int   sbFillBar = na
+inSB = inSess(sbSess)
+
+if useSB and inSB and not sbDone and flat and not lossHit and sbDir == 0
+    if bullFvg
+        r = low - (swingLow - 1)
+        if r >= 4 and r <= sbMaxRisk
+            sbDir := 1
+            sbEntry := low
+            sbStop := swingLow - 1
+    else if bearFvg
+        r = (swingHigh + 1) - high
+        if r >= 4 and r <= sbMaxRisk
+            sbDir := -1
+            sbEntry := high
+            sbStop := swingHigh + 1
+
+if sbDir != 0 and not sbDone
+    if inSB and flat
+        if sbDir == 1
+            strategy.entry("SB L", strategy.long, limit=sbEntry)
+        else
+            strategy.entry("SB S", strategy.short, limit=sbEntry)
+    else if flat
+        strategy.cancel("SB L")
+        strategy.cancel("SB S")
+        sbDir := 0
+        sbDone := true
+
+if strategy.position_size != 0 and strategy.opentrades > 0
+    eid = strategy.opentrades.entry_id(0)
+    if eid == "SB L" or eid == "SB S"
+        sbDone := true
+        if na(sbFillBar)
+            sbFillBar := bar_index
+        r = math.abs(sbEntry - sbStop)
+        d = eid == "SB L" ? 1 : -1
+        strategy.exit("SB X", eid, stop=sbStop, limit=sbEntry + d * sbRR * r)
+        if bar_index - sbFillBar >= sbMaxBars
+            strategy.close(eid, comment="SB time")
+if strategy.position_size == 0 and sbDone
+    sbDir := 0
+    sbFillBar := na
+
+// ================= 3) Last-hour momentum =================
+// Direction of (10:00 price - prior RTH close); hold 15:00 -> 15:55.
+lhDir = na(close959) or na(prevRthClose) ? 0 : int(math.sign(close959 - prevRthClose))
+if useLH and inSess(lhEntryBar) and not lhDone and flat and not lossHit and lhDir != 0
+    lhDone := true
+    if lhDir == 1
+        strategy.entry("LH L", strategy.long)
+    else
+        strategy.entry("LH S", strategy.short)
+
+// ---------- Flatten ----------
+if inSess(flatSess) or lossHit
+    strategy.close_all("Flat")
+    strategy.cancel_all()
+
+// ---------- Plots ----------
+plot(inSess(lonTrade) or inSess(londonSess) ? lonH : na, "London high", color=color.new(color.teal, 0),   style=plot.style_linebr)
+plot(inSess(lonTrade) or inSess(londonSess) ? lonL : na, "London low",  color=color.new(color.orange, 0), style=plot.style_linebr)
+bgcolor(inSB ? color.new(color.purple, 90) : na, title="Silver Bullet window")
+bgcolor(inSess("1500-1555") ? color.new(color.blue, 92) : na, title="Last hour")
+plotshape(useSB and inSB and bullFvg, "Bull FVG", shape.triangleup,   location.belowbar, color.new(color.green, 0), size=size.tiny)
+plotshape(useSB and inSB and bearFvg, "Bear FVG", shape.triangledown, location.abovebar, color.new(color.red, 0),   size=size.tiny)
