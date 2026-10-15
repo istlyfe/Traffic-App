@@ -1,0 +1,30 @@
+TF,Strategy,IS_n,IS_win%,IS_avgpt,OOS_n,OOS_win%,OOS_avgpt
+Daily,"Buy dip after 1 down day(s) in uptrend, hold day",24,71,64.8,27,30,-50.5
+Daily,"Buy dip after 1 down day(s), hold day",60,58,6.1,51,41,-27.0
+Daily,"Buy dip after 2 down day(s) in uptrend, hold day",26,62,-22.6,20,25,-109.6
+Daily,"Buy dip after 2 down day(s), hold day",64,59,13.3,43,35,-81.1
+Daily,"Buy dip after 3 down day(s) in uptrend, hold day",7,43,-200.8,10,20,-84.8
+Daily,"Buy dip after 3 down day(s), hold day",28,50,1.7,22,27,-105.2
+Daily,Long every Mon (open->close),35,63,59.2,17,47,21.4
+Daily,Long every Tue (open->close),35,63,22.7,17,41,35.7
+Daily,Long every Wed (open->close),35,60,5.6,18,33,-122.0
+Daily,Long every Thu (open->close),33,48,-60.1,18,61,25.3
+Daily,Long every Fri (open->close),35,66,10.3,17,29,-32.8
+1h,"PDH/PDL fade, stop/target 0.5x ATR",141,42,-32.0,79,37,-43.1
+1h,"PDH/PDL breakout, stop/target 0.5x ATR",141,56,28.5,79,63,41.6
+1h,"PDH/PDL fade, stop/target 1.0x ATR",141,43,-39.5,79,35,-85.6
+1h,"PDH/PDL breakout, stop/target 1.0x ATR",141,56,38.0,79,65,84.1
+1h,"Fade big candle >2x avg range, hold 1h",238,40,-17.8,94,52,7.5
+1h,"Follow big candle >2x avg range, hold 1h",238,59,16.3,94,48,-9.0
+1h,"Fade big candle >2x avg range, hold 3h",238,47,-13.6,93,51,14.8
+1h,"Follow big candle >2x avg range, hold 3h",238,53,12.1,93,48,-16.3
+1h,"Fade big candle >2.5x avg range, hold 1h",99,43,-22.8,41,49,-7.8
+1h,"Follow big candle >2.5x avg range, hold 1h",99,57,21.3,41,51,6.3
+1h,"Fade big candle >2.5x avg range, hold 3h",99,53,-7.8,40,55,17.6
+1h,"Follow big candle >2.5x avg range, hold 3h",99,47,6.3,40,45,-19.1
+4h,Trend: next 4h bar in direction of 20-SMA,1005,50,-4.1,518,49,-3.9
+5m,"Gap fill (5-80pt gap), stop = gap size",0,0,0.0,12,33,-19.6
+5m,"VWAP pullback with first-hour direction, 2R",0,0,0.0,40,52,23.8
+5m,First hour >40pt -> hold same direction 10:30-close,0,0,0.0,32,41,-18.9
+15m,"VWAP pullback with first-hour direction, 2R",0,0,0.0,43,33,-16.8
+15m,First hour >40pt -> hold same direction 10:30-close,0,0,0.0,32,41,-18.9
