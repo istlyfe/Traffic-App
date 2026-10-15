@@ -1,11 +1,14 @@
 //@version=6
-strategy("PDH/PDL Breakout (NQ) - time filter + trailing exits", overlay=true,
+strategy("PDH/PDL Breakout (NQ) - time filter + trailing exits + time stop", overlay=true,
      pyramiding=0, initial_capital=50000, default_qty_type=strategy.fixed, default_qty_value=1,
      commission_type=strategy.commission.cash_per_contract, commission_value=0.75, slippage=1,
      process_orders_on_close=false)
 
 // ---------- Inputs ----------
-atrMult      = input.float(0.5,  "Initial stop (x daily range ATR)", step=0.1)
+stopType     = input.string("ATR", "Initial stop type", options=["ATR", "Fixed points"])
+atrMult      = input.float(0.5,  "Initial stop (x daily range ATR) - ATR type", step=0.1)
+fixedStopPts = input.float(100,  "Initial stop (pts) - Fixed points type")
+timeStopMin  = input.int(60,     "Time stop: exit if not +activate pts within N minutes (0 = off)", minval=0)
 atrLen       = input.int(14,     "Daily range ATR length")
 levelSess    = input.session("0900-1600", "Session used for prior-day high/low")
 tradeSess    = input.session("0930-1130", "Entry window (time filter)")
@@ -48,7 +51,7 @@ if inLvl
     curL := na(curL) ? low  : math.min(curL, low)
 
 rangeAtr = array.size(ranges) == atrLen ? array.avg(ranges) : na
-risk     = rangeAtr * atrMult
+risk     = stopType == "ATR" ? rangeAtr * atrMult : fixedStopPts
 
 // ---------- Daily trade bookkeeping ----------
 var int   tradesToday = 0
@@ -71,7 +74,7 @@ if strategy.closedtrades > closedSeen
 
 inTrade  = not na(time(timeframe.period, tradeSess, tz))
 inFlat   = not na(time(timeframe.period, flatTime, tz))
-canTrade = inTrade and not na(risk) and not na(pdh) and strategy.position_size == 0 and
+canTrade = inTrade and not na(rangeAtr) and not na(pdh) and strategy.position_size == 0 and
            tradesToday < maxTrades and not (stopAfterLoss and lostToday)
 
 // ---------- Orders: stop entries at PDH / PDL ----------
@@ -111,6 +114,19 @@ if strategy.position_size != 0
     else
         strategy.exit(xid, id, stop=e - dir * risk,
              trail_points=toTicks(activatePts), trail_offset=toTicks(actTrailPts))
+
+// ---------- Time stop ----------
+// Exit if the trade has not reached +activatePts within timeStopMin minutes.
+var int   entryTime = na
+var float bestPts   = 0.0
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    entryTime := time
+    bestPts   := 0.0
+if strategy.position_size != 0
+    dir2 = strategy.position_size > 0 ? 1 : -1
+    bestPts := math.max(bestPts, dir2 == 1 ? high - strategy.position_avg_price : strategy.position_avg_price - low)
+    if timeStopMin > 0 and bestPts < activatePts and (time_close - entryTime) >= timeStopMin * 60000
+        strategy.close_all("Time stop")
 
 if inFlat
     strategy.close_all("EOD flat")
