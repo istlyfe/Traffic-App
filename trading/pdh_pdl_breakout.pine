@@ -1,0 +1,106 @@
+//@version=6
+strategy("PDH/PDL Breakout (NQ) - time filter + stop after loss", overlay=true,
+     pyramiding=0, initial_capital=50000, default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.75, slippage=1,
+     process_orders_on_close=false)
+
+// ---------- Inputs ----------
+atrMult      = input.float(0.5,  "Stop & target (x daily range ATR)", step=0.1)
+atrLen       = input.int(14,     "Daily range ATR length")
+levelSess    = input.session("0900-1600", "Session used for prior-day high/low")
+tradeSess    = input.session("0930-1130", "Entry window (time filter)")
+flatTime     = input.session("1555-1600", "Flatten window")
+maxTrades    = input.int(2,      "Max trades per day", minval=1)
+stopAfterLoss= input.bool(true,  "Stop trading for the day after one loss")
+tz           = "America/New_York"
+
+// ---------- Prior-day high / low built from the session ----------
+inLvl   = not na(time(timeframe.period, levelSess, tz))
+newDay  = timeframe.change("D")   // CME session rolls at 18:00 ET
+
+var float curH = na
+var float curL = na
+var float pdh  = na
+var float pdl  = na
+var array<float> ranges = array.new_float()
+
+if newDay
+    if not na(curH)
+        pdh := curH
+        pdl := curL
+        array.push(ranges, curH - curL)
+        if array.size(ranges) > atrLen
+            array.shift(ranges)
+    curH := na
+    curL := na
+
+if inLvl
+    curH := na(curH) ? high : math.max(curH, high)
+    curL := na(curL) ? low  : math.min(curL, low)
+
+rangeAtr = array.size(ranges) == atrLen ? array.avg(ranges) : na
+risk     = rangeAtr * atrMult
+
+// ---------- Daily trade bookkeeping ----------
+var int   tradesToday = 0
+var bool  lostToday   = false
+var bool  longUsed    = false
+var bool  shortUsed   = false
+var int   closedSeen  = 0
+
+if newDay
+    tradesToday := 0
+    lostToday   := false
+    longUsed    := false
+    shortUsed   := false
+
+// detect newly closed trades
+if strategy.closedtrades > closedSeen
+    for i = closedSeen to strategy.closedtrades - 1
+        if strategy.closedtrades.profit(i) < 0
+            lostToday := true
+    closedSeen := strategy.closedtrades
+
+inTrade  = not na(time(timeframe.period, tradeSess, tz))
+inFlat   = not na(time(timeframe.period, flatTime, tz))
+canTrade = inTrade and not na(risk) and not na(pdh) and strategy.position_size == 0 and
+           tradesToday < maxTrades and not (stopAfterLoss and lostToday)
+
+// ---------- Orders: stop entries at PDH / PDL ----------
+if canTrade
+    if not longUsed and close < pdh
+        strategy.entry("Long", strategy.long, stop=pdh)
+    if not shortUsed and close > pdl
+        strategy.entry("Short", strategy.short, stop=pdl)
+else
+    strategy.cancel("Long")
+    strategy.cancel("Short")
+
+// mark fills
+if strategy.position_size > 0 and strategy.position_size[1] == 0
+    longUsed := true
+    tradesToday += 1
+    strategy.cancel("Short")
+if strategy.position_size < 0 and strategy.position_size[1] == 0
+    shortUsed := true
+    tradesToday += 1
+    strategy.cancel("Long")
+
+// brackets: fixed stop / target = atrMult x daily range ATR from entry
+if strategy.position_size > 0
+    e = strategy.position_avg_price
+    strategy.exit("L-exit", "Long", stop=e - risk, limit=e + risk)
+if strategy.position_size < 0
+    e = strategy.position_avg_price
+    strategy.exit("S-exit", "Short", stop=e + risk, limit=e - risk)
+
+if inFlat
+    strategy.close_all("EOD flat")
+
+// ---------- Plots & alerts ----------
+plot(pdh, "PDH", color=color.new(color.green, 0), style=plot.style_linebr)
+plot(pdl, "PDL", color=color.new(color.red, 0),   style=plot.style_linebr)
+bgcolor(inTrade ? color.new(color.blue, 92) : na, title="Entry window")
+
+alertcondition(inTrade and ta.crossover(high, pdh), "PDH break", "NQ broke prior-day high")
+alertcondition(inTrade and ta.crossunder(low, pdl), "PDL break", "NQ broke prior-day low")
