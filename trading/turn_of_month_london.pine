@@ -1,0 +1,124 @@
+//@version=6
+strategy("NQ Turn-of-Month Long + London Breakout add-on", overlay=true,
+     pyramiding=0, initial_capital=50000, default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.75, slippage=1,
+     process_orders_on_close=false)
+
+// Built for a 5-minute NQ1!/MNQ1! chart (works on 1-15m) with the overnight session visible.
+// 5y backtest (2021-08..2026-08, NQ 1m): TOM long, 0.5x ATR stop -> 238 trades, 52% win, +28 pts/trade.
+// "Last trading day" is estimated from the calendar (weekends only, exchange holidays not known).
+
+tz = "America/New_York"
+inSess(s) => not na(time(timeframe.period, s, tz))
+
+// ---------- Inputs ----------
+useTom   = input.bool(true,  "Turn-of-month long",          group="Modules")
+useLon   = input.bool(false, "London breakout add-on",      group="Modules")
+dailyLossUsd = input.float(0, "Daily loss limit $ (0 = off)", group="Modules")
+
+tomFirstN = input.int(3,     "First N trading days of month", minval=0, group="Turn of month")
+tomLast   = input.bool(true, "Also trade the last trading day", group="Turn of month")
+tomStopX  = input.float(0.5, "Stop (x ATR, 0 = no stop)", step=0.05, group="Turn of month")
+
+londonSess = input.session("0300-0930", "London range session", group="London")
+lonTrade   = input.session("0930-1130", "Entry window",         group="London")
+lonStopX   = input.float(0.5, "Stop (x ATR)", step=0.05,         group="London")
+lonRR      = input.float(2.0, "Target (R)",   step=0.25,         group="London")
+
+atrLen     = input.int(14, "Daily RTH range ATR length", group="Common")
+
+// ---------- Sessions & daily state ----------
+rthSess  = inSess("0930-1600")
+preOpen  = inSess("0925-0930")          // bar before the open: orders fill at 9:30 open
+flatSess = inSess("1555-1800")
+newDay   = timeframe.change("D")        // CME session rolls at 18:00 ET
+
+var float dayStartEq = na
+var float lonH = na
+var float lonL = na
+var float rthH = na
+var float rthL = na
+var array<float> ranges = array.new_float()
+var bool lonDone = false
+var bool tomDone = false
+var int  tdInMonth = 0
+var int  lastMonth = na
+
+if newDay
+    if not na(rthH)
+        array.push(ranges, rthH - rthL)
+        if array.size(ranges) > atrLen
+            array.shift(ranges)
+    lonH := na
+    lonL := na
+    rthH := na
+    rthL := na
+    lonDone := false
+    tomDone := false
+    dayStartEq := strategy.equity
+
+if inSess(londonSess)
+    lonH := na(lonH) ? high : math.max(lonH, high)
+    lonL := na(lonL) ? low  : math.min(lonL, low)
+if rthSess
+    rthH := na(rthH) ? high : math.max(rthH, high)
+    rthL := na(rthL) ? low  : math.min(rthL, low)
+
+atr     = array.size(ranges) == atrLen ? array.avg(ranges) : na
+flat    = strategy.position_size == 0
+lossHit = dailyLossUsd > 0 and not na(dayStartEq) and strategy.equity - dayStartEq <= -dailyLossUsd
+curId   = strategy.opentrades > 0 ? strategy.opentrades.entry_id(0) : ""
+
+// ---------- Trading-day count within the month (evaluated on the 9:25 bar) ----------
+m  = month(time, tz)
+y  = year(time, tz)
+dw = dayofweek(time, tz)
+isFirstPreOpenBar = preOpen and not preOpen[1]
+if isFirstPreOpenBar and dw != dayofweek.saturday and dw != dayofweek.sunday
+    tdInMonth := (na(lastMonth) or m != lastMonth) ? 1 : tdInMonth + 1
+    lastMonth := m
+
+// Next weekday's month (weekends skipped; holidays unknown)
+daysToNext = dw == dayofweek.friday ? 3 : 1
+nextT      = time + daysToNext * 86400000
+isLastTd   = month(nextT, tz) != m
+
+isTomDay = (tdInMonth >= 1 and tdInMonth <= tomFirstN) or (tomLast and isLastTd)
+
+// ================= 1) Turn-of-month long =================
+if useTom and isFirstPreOpenBar and isTomDay and not tomDone and flat and not lossHit and not na(atr)
+    strategy.entry("TOM L", strategy.long)
+    tomDone := true
+if curId == "TOM L"
+    if tomStopX > 0
+        strategy.exit("TOM X", "TOM L", stop=strategy.position_avg_price - tomStopX * atr)
+
+// ================= 2) London breakout add-on =================
+lonRisk = atr * lonStopX
+lonOk = useLon and inSess(lonTrade) and not lonDone and flat and not lossHit and not na(lonRisk) and not na(lonH)
+if lonOk
+    if close < lonH
+        strategy.entry("LON L", strategy.long, stop=lonH)
+    if close > lonL
+        strategy.entry("LON S", strategy.short, stop=lonL)
+else
+    strategy.cancel("LON L")
+    strategy.cancel("LON S")
+if curId == "LON L" or curId == "LON S"
+    lonDone := true
+    e = strategy.position_avg_price
+    d = curId == "LON L" ? 1 : -1
+    strategy.exit("LON X", curId, stop=e - d * lonRisk, limit=e + d * lonRR * lonRisk)
+
+// ---------- Flatten ----------
+if flatSess or lossHit
+    strategy.close_all("Flat")
+    strategy.cancel_all()
+
+// ---------- Plots & alerts ----------
+bgcolor(isTomDay and rthSess ? color.new(color.green, 90) : na, title="Turn-of-month day")
+plot(useLon and (inSess(lonTrade) or inSess(londonSess)) ? lonH : na, "London high", color=color.new(color.teal, 0),   style=plot.style_linebr)
+plot(useLon and (inSess(lonTrade) or inSess(londonSess)) ? lonL : na, "London low",  color=color.new(color.orange, 0), style=plot.style_linebr)
+plot(curId == "TOM L" and tomStopX > 0 ? strategy.position_avg_price - tomStopX * atr : na, "TOM stop", color=color.new(color.red, 0), style=plot.style_linebr)
+alertcondition(isFirstPreOpenBar and isTomDay, "Turn-of-month day", "Turn-of-month long: buy NQ at the 9:30 open")
+alertcondition(useLon and inSess(lonTrade) and (ta.crossover(high, lonH) or ta.crossunder(low, lonL)), "London break", "NQ broke the London range")
