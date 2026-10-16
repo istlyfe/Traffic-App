@@ -1,0 +1,281 @@
+// Thiss source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+
+//@version=6
+
+strategy('Babs Algo', shorttitle = 'Babs Algo', overlay = true, initial_capital = 50000, default_qty_type = strategy.fixed, default_qty_value = 1, commission_type = strategy.commission.cash_per_contract, commission_value = 0.75, slippage = 1, max_labels_count = 500)
+
+timer = 21
+source = input(hl2, 'Source')
+MTP = input(1.4)
+sf = input.float(1, 'Sensitivity [0,1]', minval = 0, maxval = 1)
+// changeATR= input(title="Changing ATR method?", type=input.bool, defval=true)
+showsignals = input(title = 'Reveal Buy/Sell Signals ?', defval = true)
+signalbulb = input(title = 'Signal light Show/Hide ?', defval = false)
+srLines = input(title = 'SupportResistance lines Show/Hide ?', defval = true)
+
+// ===== Strategy settings (all OFF by default = trade every signal like the indicator) =====
+stratExit = input.string('Hull Close or opposite signal', 'Strategy exit', options = ['Hull Close or opposite signal', 'Opposite signal only'], group = 'Strategy')
+stratDir = input.string('Both', 'Strategy direction', options = ['Both', 'Long only', 'Short only'], group = 'Strategy')
+useSessionFilter = input.bool(false, 'Only enter inside session', group = 'Strategy')
+entrySession = input.session('0930-1555', 'Entry session', group = 'Strategy')
+useDailyFlat = input.bool(false, 'Close all positions daily', group = 'Strategy')
+flatSession = input.session('1555-1600', 'Close-all window', group = 'Strategy')
+sessTZ = input.string('America/New_York', 'Session timezone', group = 'Strategy')
+
+avg = 0.
+src = sf * source + (1 - sf) * nz(avg[1], source)
+atrsecond = ta.sma(ta.tr, timer)
+atr = atrsecond
+up = src - MTP * atr
+up1 = nz(up[1], up)
+up := close[1] > up1 ? math.max(up, up1) : up
+dn = src + MTP * atr
+dn1 = nz(dn[1], dn)
+dn := close[1] < dn1 ? math.min(dn, dn1) : dn
+avg := math.avg(up, dn)
+
+trend = 1
+trend := nz(trend[1], trend)
+trend := trend == -1 and close > dn1 ? 1 : trend == 1 and close < up1 ? -1 : trend
+// upperP = plot(trend == 1 ? up : na, title="Up Trend", style=plot.style_linebr, linewidth=2, color=#77E1A3)
+
+
+LongSignal = trend == 1 and trend[1] == -1
+// buysignalcondo = valuewhen(crossover(high,latest_bull_low),1,0)
+
+
+plotshape(LongSignal ? up : na, title = 'UpTrend Begins', location = location.absolute, style = shape.circle, size = size.tiny, color = color.new(#77E1A3, 0))
+
+
+ShortSignal = trend == -1 and trend[1] == 1
+
+
+plotshape(ShortSignal ? dn : na, title = 'DownTrend Begins', location = location.absolute, style = shape.circle, size = size.tiny, color = color.new(#E10078, 0))
+
+PlotMiddle = plot(ohlc4, title = '', style = plot.style_circles, linewidth = math.max(1, 0))
+
+BuyColorSpread = signalbulb ? trend == 1 ? color.new(color.lime, 92) : color.white : na
+SellColorSpread = signalbulb ? trend == -1 ? color.new(color.red, 92) : color.white : na
+
+// fill(PlotMiddle, upperP, title="UpTrend Highligter", color=BuyColorSpread)
+// fill(PlotMiddle, lowP, title="DownTrend Highligter", color=SellColorSpread)
+
+inLongPosition = bool(na)
+inLongPosition := bool(up) ? true : bool(dn) ? false : false
+inShortPosition = bool(na)
+inShortPosition := bool(dn) ? true : bool(up) ? false : false
+flat = bool(na)
+flat := not inLongPosition and not inShortPosition
+
+
+bgcolor(color = BuyColorSpread[1], offset = -1, title = 'bgColor Up')
+bgcolor(color = SellColorSpread[1], offset = -1, title = 'bgColor Down')
+
+
+//BARCOLOR
+barcolor(LongSignal ? color.yellow : ShortSignal ? color.yellow : na)
+
+
+src_t = input(close, title = 'Source')
+mSw = input.string('Hull_moving_average', title = 'Hull Type', options = ['Hull_moving_average', 'Triple_hull_moving_average', 'Exponential_hull_moving_average'])
+length = input(27, title = 'Length')
+sColor = input(true, 'Color hull according to trend?')
+CC = input(false, title = 'Color candles based on hull\'s trend?')
+SVi = input(true, title = 'Show as a band?')
+Sthick = input(1, title = 'Line thickness')
+SwTra = input.int(75, title = 'Band transparency', step = 5)
+
+hMa(_src, _length) =>
+    ta.hma(_src, length)
+eHmA(_src, _length) =>
+    ta.ema(2 * ta.ema(_src, _length / 2) - ta.ema(_src, _length), math.round(math.sqrt(_length)))
+tHmA(_src, _length) =>
+    ta.wma(ta.wma(_src, _length / 3) * 3 - ta.wma(_src, _length / 2) - ta.wma(_src, _length), _length)
+
+//SWITCH
+MDe(mSw, src_t, len) =>
+    mSw == 'Hull_moving_average' ? hMa(src_t, len) : mSw == 'Exponential_hull_moving_average' ? eHmA(src_t, len) : mSw == 'Triple_hull_moving_average' ? tHmA(src_t, len / 2) : na
+
+source_t = sf * src_t + (1 - sf) * avg
+hUll = MDe(mSw, source_t, length)
+MhUll = hUll[0]
+ShUll = hUll[2]
+
+
+hUllColor = sColor ? hUll > hUll[2] ? #77E1A3 : #E10078 : #cf5800
+
+
+Fi1 = plot(MhUll, title = 'Hull upper line', color = hUllColor, linewidth = math.max(1, Sthick))
+Fi2 = plot(SVi ? ShUll : na, title = 'Hull lower line', color = hUllColor, linewidth = math.max(1, Sthick))
+///< Ending Filler
+fill(Fi1, Fi2, title = 'Band Filler', color = hUllColor)
+///BARCOLOR
+// barcolor(color = CC ? (sColor ? hUllColor : na) : na)
+
+
+
+
+isLong = trend == 1 ? up : na
+isShort = trend == 1 ? na : dn
+
+its_long = false
+its_short = false
+
+if bool(isLong)
+    its_long := true
+    its_long
+else
+    its_long := false
+    its_long
+
+if bool(isShort)
+    its_short := true
+    its_short
+else
+    its_short := false
+    its_short
+
+
+BARcolor_moving_avg = its_long ? #00ff0a : its_short ? #ff0500 : na
+
+
+
+dashOn = input(true, 'Dashboard On / Off')
+dashDist = input(13, 'Dashboard Distance')
+dashColor = input.color(color.new(color.black, 0), 'Dashboard Color', inline = 'Dash Line')
+dashTextColor = input.color(color.new(#ffffff, 0), 'Text Color', inline = 'Dash Line')
+
+//Calculates Volatility for Dashboard
+atrd = ta.atr(14)
+stdAtrd = 2 * ta.stdev(atrd, 20)
+smaAtrd = ta.sma(atrd, 20)
+topAtrDevd = smaAtrd + stdAtrd
+bottomAtrDevd = smaAtrd - stdAtrd
+calcDevd = (atrd - bottomAtrDevd) / (topAtrDevd - bottomAtrDevd)
+percentVold = 40 * calcDevd + 30
+
+//Calculates Volume for Dashboard
+volumeDash = volume
+
+//RSI for Dashboard
+rsiDash = ta.rsi(close, 14)
+
+//Calculates Sentiment for Dashboard
+ema9 = ta.ema(close, 9)
+totalSentTxt = ema9 > ema9[2] ? 'Bullish' : ema9 < ema9[2] ? 'Bearish' : 'Flat'
+
+//Defines Each Timeframe for Trend Panel
+sma = ta.sma(close, 50)
+oneM = request.security(syminfo.tickerid, '1', sma, barmerge.gaps_off, barmerge.lookahead_off)
+fiveM = request.security(syminfo.tickerid, '5', sma, barmerge.gaps_off, barmerge.lookahead_off)
+fifteenM = request.security(syminfo.tickerid, '15', sma, barmerge.gaps_off, barmerge.lookahead_off)
+thirtyM = request.security(syminfo.tickerid, '30', sma, barmerge.gaps_off, barmerge.lookahead_off)
+oneH = request.security(syminfo.tickerid, '60', sma, barmerge.gaps_off, barmerge.lookahead_off)
+twoH = request.security(syminfo.tickerid, '120', sma, barmerge.gaps_off, barmerge.lookahead_off)
+fourH = request.security(syminfo.tickerid, '240', sma, barmerge.gaps_off, barmerge.lookahead_off)
+weekly = request.security(syminfo.tickerid, 'W', sma, barmerge.gaps_off, barmerge.lookahead_off)
+monthly = request.security(syminfo.tickerid, 'M', sma, barmerge.gaps_off, barmerge.lookahead_off)
+daily = request.security(syminfo.tickerid, 'D', sma, barmerge.gaps_off, barmerge.lookahead_off)
+
+//Defines An Uptrend for Trend Panel
+oneMUp = oneM > oneM[1]
+fiveMUp = fiveM > fiveM[1]
+fifteenMUp = fifteenM > fifteenM[1]
+thirtyMUp = thirtyM > thirtyM[1]
+oneHUp = oneH > oneH[1]
+twoHUp = twoH > twoH[1]
+fourHUp = fourH > fourH[1]
+weeklyUp = weekly > weekly[1]
+monthlyUp = monthly > monthly[1]
+dailyUp = daily > daily[1]
+
+//Checks if the Current State is an Uptrend or Downtrend for the Trend Panel
+upd = '🟢'
+downd = '🔴'
+oneMTrend = oneMUp ? upd : downd
+fiveMTrend = fiveMUp ? upd : downd
+fifteenMTrend = fifteenMUp ? upd : downd
+thirtyMTrend = thirtyMUp ? upd : downd
+oneHTrend = oneHUp ? upd : downd
+twoHTrend = twoHUp ? upd : downd
+fourHTrend = fourHUp ? upd : downd
+weeklyTrend = weeklyUp ? upd : downd
+monthlyTrend = monthlyUp ? upd : downd
+dailyTrend = dailyUp ? upd : downd
+
+if dashOn and barstate.islast
+    label lemonLabel = label.new(time, close, text = '  ' + '\n━━━━━━━━━━━━━━━━━' + '\n Market Info    ' + '\n━━━━━━━━━━━━━━━━━' + '\n🖥   Volatility                     | ' + str.tostring(percentVold, '##.##') + '%' + '\n🖥 Volume                           | ' + str.tostring(volumeDash, '##.##') + '\n🖥 RSI                                           | ' + str.tostring(rsiDash, '##.##') + '\n🖥 Current Sentiment | ' + totalSentTxt + '\n━━━━━━━━━━━━━━━━━' + '\n                  Trend   ' + '\n━━━━━━━━━━━━━━━━━' + '\n     1 Minute | ' + oneMTrend + '         2 Hour | ' + twoHTrend + '\n     5 Minute | ' + fiveMTrend + '         4 Hour | ' + fourHTrend + '\n        15 Minute | ' + fifteenMTrend + '         Weekly | ' + weeklyTrend + '\n        30 Minute | ' + thirtyMTrend + '            Daily  |     ' + dailyTrend + '\n        1 Hour | ' + oneHTrend + '            Monthly |' + monthlyTrend + '\n━━━━━━━━━━━━━━━━━', color = dashColor, xloc = xloc.bar_time, style = label.style_label_left, textcolor = dashTextColor, textalign = text.align_left)
+    label.set_x(lemonLabel, label.get_x(lemonLabel) + math.round(ta.change(time) * dashDist))
+    label.delete(lemonLabel[1])
+
+barcolor(bool(isLong) ? color.green : bool(isShort) ? color.red : na) //barcolor according to trend
+
+
+// hUllColor = sColor ? (hUll > hUll[2] ? #77E1A3 : #E10078) : #cf5800
+
+
+//Support / Resistance Lines
+h1000 = ta.highest(1000)
+h750 = ta.highest(750)
+h500 = ta.highest(500)
+h250 = ta.highest(250)
+h100 = ta.highest(100)
+h50 = ta.highest(50)
+h10 = ta.highest(10)
+plot(srLines ? h1000 : na, title = 'R1', color = close > h1000 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? h750 : na, title = 'R2', color = close > h750 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? h500 : na, title = 'R3', color = close > h500 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? h250 : na, title = 'R4', color = close > h250 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? h100 : na, title = 'R5', color = close > h100 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? h50 : na, title = 'R6', color = close > h50 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? h10 : na, title = 'R6', color = close > h50 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+
+l1000 = ta.lowest(1000)
+l750 = ta.lowest(750)
+l500 = ta.lowest(500)
+l250 = ta.lowest(250)
+l100 = ta.lowest(100)
+l50 = ta.lowest(50)
+l10 = ta.lowest(10)
+plot(srLines ? l1000 : na, title = 'S1', color = close > l1000 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? l750 : na, title = 'S2', color = close > l750 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? l500 : na, title = 'S3', color = close > l500 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? l250 : na, title = 'S4', color = close > l250 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? l100 : na, title = 'S5', color = close > l100 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? l50 : na, title = 'S6', color = close > l50 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+plot(srLines ? l10 : na, title = 'S6', color = close > l50 ? color.green : color.red, linewidth = 3, offset = -9999, trackprice = true, style = plot.style_line)
+
+
+
+LongExit = not na(isLong) and hUllColor == #E10078 and hUllColor[1] == #77E1A3
+ShortExit = not na(isShort) and hUllColor == #77E1A3 and hUllColor[1] == #E10078
+plotshape(ShortExit, style = shape.triangleup, location = location.belowbar, text = 'Close', textcolor = color.new(color.black, 0), size = size.small)
+plotshape(LongExit, style = shape.triangledown, location = location.abovebar, text = 'Close', textcolor = color.new(color.black, 0), size = size.small)
+
+plotshape(LongSignal and showsignals ? up : na, title = 'Buy', style = shape.labelup, location = location.belowbar, size = size.small, text = 'BULL', textcolor = color.new(color.white, 0), color = color.new(color.green, 0))
+plotshape(ShortSignal and showsignals ? dn : na, title = 'Sell', style = shape.labeldown, location = location.abovebar, size = size.small, text = 'BEAR', textcolor = color.new(color.white, 0), color = color.new(color.red, 0))
+
+alertcondition(LongSignal, title = 'BULL', message = 'BULL')
+alertcondition(ShortSignal, title = 'BEAR', message = 'BEAR')
+
+alertcondition(ShortExit or LongExit, title = 'Close', message = 'Close')
+
+// ===================== STRATEGY ORDERS (added) =====================
+inEntrySess = not useSessionFilter or not na(time(timeframe.period, entrySession, sessTZ))
+inFlatSess = useDailyFlat and not na(time(timeframe.period, flatSession, sessTZ))
+
+if LongSignal
+    strategy.close('Short', comment = 'BULL')
+    if stratDir != 'Short only' and inEntrySess and not inFlatSess
+        strategy.entry('Long', strategy.long, comment = 'BULL')
+if ShortSignal
+    strategy.close('Long', comment = 'BEAR')
+    if stratDir != 'Long only' and inEntrySess and not inFlatSess
+        strategy.entry('Short', strategy.short, comment = 'BEAR')
+if stratExit == 'Hull Close or opposite signal'
+    if LongExit
+        strategy.close('Long', comment = 'Close')
+    if ShortExit
+        strategy.close('Short', comment = 'Close')
+if inFlatSess
+    strategy.close_all(comment = 'Daily flat')
