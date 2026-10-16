@@ -1,0 +1,141 @@
+//@version=6
+strategy("Fib 0.786 Retrace - Trend/BOS/Sweep/NY (15m)", overlay=true,
+     pyramiding=0, initial_capital=50000, default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.75, slippage=1,
+     process_orders_on_close=false)
+
+// Built for a 15-minute NQ1!/MNQ1! chart.
+// 5y backtest (2021-08..2026-08, N=10, leg>=120, 1h EMA50 trend, NY, 2R): 36 trades, 58% win, +28 pts/trade.
+// Small sample -> paper trade / alerts first.
+
+// ---------- Inputs ----------
+N         = input.int(10,     "Swing strength (bars each side)", minval=2)
+minLeg    = input.float(120,  "Min leg size (pts)")
+maxLeg    = input.float(400,  "Max leg size (pts)")
+fibLvl    = input.float(0.786,"Entry retracement", step=0.001)
+tgtMode   = input.string("2R", "Target", options=["2R", "Fib 0 (leg end)"])
+rrMult    = input.float(2.0,  "R multiple (2R mode)", step=0.25)
+stopBuf   = input.float(1.0,  "Stop buffer beyond fib 1 (pts)")
+expiryBars= input.int(16,     "Cancel pending order after N bars")
+maxHold   = input.int(32,     "Max hold (bars)")
+useTrend  = input.bool(true,  "Filter: 1h EMA trend")
+emaLen    = input.int(50,     "1h EMA length")
+useBos    = input.bool(true,  "Filter: leg breaks previous swing (BOS)")
+useSweep  = input.bool(true,  "Filter: leg starts with a sweep of previous swing")
+useNY     = input.bool(true,  "Filter: entries 09:30-16:00 ET only")
+tz        = "America/New_York"
+
+inSess(s) => not na(time(timeframe.period, s, tz))
+nySess   = inSess("0930-1600")
+flatSess = inSess("1608-1800")   // Topstep: flat before 16:10 ET
+
+// ---------- 1h trend (completed bars only) ----------
+h1Close = request.security(syminfo.tickerid, "60", close[1], lookahead=barmerge.lookahead_on)
+h1Ema   = request.security(syminfo.tickerid, "60", ta.ema(close, emaLen)[1], lookahead=barmerge.lookahead_on)
+trend   = h1Close > h1Ema ? 1 : h1Close < h1Ema ? -1 : 0
+
+// ---------- Swings ----------
+ph = ta.pivothigh(high, N, N)
+pl = ta.pivotlow(low, N, N)
+
+var float lastPH = na
+var int   lastPHbar = na
+var float prevPH = na
+var float lastPL = na
+var int   lastPLbar = na
+var float prevPL = na
+
+newPH = not na(ph)
+newPL = not na(pl)
+if newPH
+    prevPH := lastPH
+    lastPH := ph
+    lastPHbar := bar_index - N
+if newPL
+    prevPL := lastPL
+    lastPL := pl
+    lastPLbar := bar_index - N
+
+// ---------- Pending setup ----------
+var int   pDir   = 0
+var float pEntry = na
+var float pStop  = na
+var float pZero  = na
+var int   pStart = na
+
+// Bearish leg (swing high -> swing low) just confirmed: short at 0.786
+if newPL and not na(lastPH) and lastPHbar < lastPLbar and strategy.position_size == 0
+    leg = lastPH - lastPL
+    lvl = lastPL + fibLvl * leg
+    retracedAlready = ta.highest(high, N)[0] >= lvl
+    ok = leg >= minLeg and leg <= maxLeg and not retracedAlready
+    ok := ok and (not useTrend or trend < 0)
+    ok := ok and (not useBos or (not na(prevPL) and lastPL < prevPL))
+    ok := ok and (not useSweep or (not na(prevPH) and lastPH > prevPH))
+    if ok
+        pDir := -1
+        pEntry := lvl
+        pStop := lastPH + stopBuf
+        pZero := lastPL
+        pStart := bar_index
+
+// Bullish leg (swing low -> swing high) just confirmed: long at 0.786
+if newPH and not na(lastPL) and lastPLbar < lastPHbar and strategy.position_size == 0
+    leg = lastPH - lastPL
+    lvl = lastPH - fibLvl * leg
+    retracedAlready = ta.lowest(low, N)[0] <= lvl
+    ok = leg >= minLeg and leg <= maxLeg and not retracedAlready
+    ok := ok and (not useTrend or trend > 0)
+    ok := ok and (not useBos or (not na(prevPH) and lastPH > prevPH))
+    ok := ok and (not useSweep or (not na(prevPL) and lastPL < prevPL))
+    if ok
+        pDir := 1
+        pEntry := lvl
+        pStop := lastPL - stopBuf
+        pZero := lastPH
+        pStart := bar_index
+
+// Invalidate: expired, or leg end broken before the retrace
+if pDir != 0 and strategy.position_size == 0
+    expired = bar_index - pStart > expiryBars
+    broken  = (pDir == -1 and low < pZero) or (pDir == 1 and high > pZero)
+    if expired or broken or flatSess
+        strategy.cancel("Fib S")
+        strategy.cancel("Fib L")
+        pDir := 0
+
+// Place / keep the limit order
+canEnter = pDir != 0 and strategy.position_size == 0 and (not useNY or nySess) and not flatSess
+if canEnter
+    if pDir == -1
+        strategy.entry("Fib S", strategy.short, limit=pEntry)
+    else
+        strategy.entry("Fib L", strategy.long, limit=pEntry)
+else if strategy.position_size == 0
+    strategy.cancel("Fib S")
+    strategy.cancel("Fib L")
+
+// ---------- Exits ----------
+var int fillBar = na
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    fillBar := bar_index
+if strategy.position_size != 0
+    d   = strategy.position_size > 0 ? 1 : -1
+    e   = strategy.position_avg_price
+    r   = math.abs(e - pStop)
+    tgt = tgtMode == "2R" ? e + d * rrMult * r : pZero
+    strategy.exit("Fib X", d == 1 ? "Fib L" : "Fib S", stop=pStop, limit=tgt)
+    if bar_index - fillBar >= maxHold
+        strategy.close_all("Max hold")
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    pDir := 0
+if flatSess
+    strategy.close_all("Session flat")
+
+// ---------- Plots & alerts ----------
+plot(pDir != 0 ? pEntry : na, "0.786 entry", color=color.new(color.blue, 0),  style=plot.style_linebr, linewidth=2)
+plot(pDir != 0 ? pStop  : na, "Stop (fib 1)", color=color.new(color.red, 0),   style=plot.style_linebr)
+plot(pDir != 0 ? pZero  : na, "Fib 0",        color=color.new(color.green, 0), style=plot.style_linebr)
+plotshape(newPH, "Swing high", shape.triangledown, location.abovebar, color.new(color.gray, 40), size=size.tiny, offset=-N)
+plotshape(newPL, "Swing low",  shape.triangleup,   location.belowbar, color.new(color.gray, 40), size=size.tiny, offset=-N)
+alertcondition(pDir != 0 and pStart == bar_index, "Fib setup armed", "Fib 0.786 setup armed on NQ")
