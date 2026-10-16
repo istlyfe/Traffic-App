@@ -45,6 +45,8 @@ var float lastPL = na
 var int   lastPLbar = na
 var float prevPL = na
 
+hiN = ta.highest(high, N)   // bars since the pivot (computed every bar)
+loN = ta.lowest(low, N)
 newPH = not na(ph)
 newPL = not na(pl)
 if newPH
@@ -67,7 +69,7 @@ var int   pStart = na
 if newPL and not na(lastPH) and lastPHbar < lastPLbar and strategy.position_size == 0
     leg = lastPH - lastPL
     lvl = lastPL + fibLvl * leg
-    retracedAlready = ta.highest(high, N)[0] >= lvl
+    retracedAlready = hiN >= lvl
     ok = leg >= minLeg and leg <= maxLeg and not retracedAlready
     ok := ok and (not useTrend or trend < 0)
     ok := ok and (not useBos or (not na(prevPL) and lastPL < prevPL))
@@ -83,7 +85,7 @@ if newPL and not na(lastPH) and lastPHbar < lastPLbar and strategy.position_size
 if newPH and not na(lastPL) and lastPLbar < lastPHbar and strategy.position_size == 0
     leg = lastPH - lastPL
     lvl = lastPH - fibLvl * leg
-    retracedAlready = ta.lowest(low, N)[0] <= lvl
+    retracedAlready = loN <= lvl
     ok = leg >= minLeg and leg <= maxLeg and not retracedAlready
     ok := ok and (not useTrend or trend > 0)
     ok := ok and (not useBos or (not na(prevPH) and lastPH > prevPH))
