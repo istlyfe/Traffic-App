@@ -1,0 +1,201 @@
+//@version=6
+strategy("NQ Combo: London Breakout + Fib 0.786 (15m)", overlay=true,
+     pyramiding=0, initial_capital=50000, default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.75, slippage=1,
+     process_orders_on_close=false)
+
+// Built for a 15-minute NQ1!/MNQ1! chart with the overnight session visible.
+// One position at a time (TradingView nets positions): whichever module triggers first trades.
+
+tz = "America/New_York"
+inSess(s) => not na(time(timeframe.period, s, tz))
+
+// ---------- Module switches ----------
+useLon = input.bool(true, "1) London range breakout", group="Modules")
+useFib = input.bool(true, "2) Fib 0.786 retrace (filtered)", group="Modules")
+dailyLossUsd = input.float(600, "Daily loss limit $ (0 = off)", group="Modules")
+
+// ---------- London inputs ----------
+londonSess = input.session("0300-0930", "London range session", group="London")
+lonTrade   = input.session("0930-1130", "Entry window",         group="London")
+atrLen     = input.int(14,    "Daily RTH range ATR length",     group="London")
+lonStopX   = input.float(0.5, "Stop (x ATR)", step=0.05,         group="London")
+lonRR      = input.float(2.0, "Target (R)",   step=0.25,         group="London")
+
+// ---------- Fib inputs ----------
+N          = input.int(10,     "Swing strength (bars each side)", minval=2, group="Fib")
+minLeg     = input.float(120,  "Min leg size (pts)",               group="Fib")
+maxLeg     = input.float(400,  "Max leg size (pts)",               group="Fib")
+fibLvl     = input.float(0.786,"Entry retracement", step=0.001,    group="Fib")
+fibRR      = input.float(2.0,  "Target (R)", step=0.25,            group="Fib")
+stopBuf    = input.float(1.0,  "Stop buffer beyond fib 1 (pts)",   group="Fib")
+expiryBars = input.int(16,     "Cancel pending order after N bars",group="Fib")
+maxHold    = input.int(32,     "Max hold (bars)",                  group="Fib")
+useTrend   = input.bool(true,  "Filter: 1h EMA trend",             group="Fib")
+emaLen     = input.int(50,     "1h EMA length",                    group="Fib")
+useBos     = input.bool(true,  "Filter: BOS",                      group="Fib")
+useSweep   = input.bool(true,  "Filter: sweep",                    group="Fib")
+useNY      = input.bool(true,  "Filter: entries 09:30-16:00 only", group="Fib")
+
+// ---------- Common sessions / daily state ----------
+rthSess  = inSess("0930-1600")
+flatSess = inSess("1555-1800")   // flat before Topstep's 16:10 ET cutoff
+newDay   = timeframe.change("D") // CME session rolls at 18:00 ET
+
+var float dayStartEq = na
+var float lonH = na
+var float lonL = na
+var float rthH = na
+var float rthL = na
+var array<float> ranges = array.new_float()
+var bool lonDone = false
+
+if newDay
+    if not na(rthH)
+        array.push(ranges, rthH - rthL)
+        if array.size(ranges) > atrLen
+            array.shift(ranges)
+    lonH := na
+    lonL := na
+    rthH := na
+    rthL := na
+    lonDone := false
+    dayStartEq := strategy.equity
+
+if inSess(londonSess)
+    lonH := na(lonH) ? high : math.max(lonH, high)
+    lonL := na(lonL) ? low  : math.min(lonL, low)
+if rthSess
+    rthH := na(rthH) ? high : math.max(rthH, high)
+    rthL := na(rthL) ? low  : math.min(rthL, low)
+
+atr     = array.size(ranges) == atrLen ? array.avg(ranges) : na
+flat    = strategy.position_size == 0
+lossHit = dailyLossUsd > 0 and not na(dayStartEq) and strategy.equity - dayStartEq <= -dailyLossUsd
+curId   = strategy.opentrades > 0 ? strategy.opentrades.entry_id(0) : ""
+
+// ================= 1) London range breakout =================
+lonRisk = atr * lonStopX
+lonOk = useLon and inSess(lonTrade) and not lonDone and flat and not lossHit and not na(lonRisk) and not na(lonH)
+if lonOk
+    if close < lonH
+        strategy.entry("LON L", strategy.long, stop=lonH)
+    if close > lonL
+        strategy.entry("LON S", strategy.short, stop=lonL)
+else
+    strategy.cancel("LON L")
+    strategy.cancel("LON S")
+if curId == "LON L" or curId == "LON S"
+    lonDone := true
+    e = strategy.position_avg_price
+    d = curId == "LON L" ? 1 : -1
+    strategy.exit("LON X", curId, stop=e - d * lonRisk, limit=e + d * lonRR * lonRisk)
+    strategy.cancel("Fib L")
+    strategy.cancel("Fib S")
+
+// ================= 2) Fib 0.786 retrace =================
+h1Close = request.security(syminfo.tickerid, "60", close[1], lookahead=barmerge.lookahead_on)
+h1Ema   = request.security(syminfo.tickerid, "60", ta.ema(close, emaLen)[1], lookahead=barmerge.lookahead_on)
+trend   = h1Close > h1Ema ? 1 : h1Close < h1Ema ? -1 : 0
+
+ph  = ta.pivothigh(high, N, N)
+pl  = ta.pivotlow(low, N, N)
+hiN = ta.highest(high, N)
+loN = ta.lowest(low, N)
+
+var float lastPH = na
+var int   lastPHbar = na
+var float prevPH = na
+var float lastPL = na
+var int   lastPLbar = na
+var float prevPL = na
+newPH = not na(ph)
+newPL = not na(pl)
+if newPH
+    prevPH := lastPH
+    lastPH := ph
+    lastPHbar := bar_index - N
+if newPL
+    prevPL := lastPL
+    lastPL := pl
+    lastPLbar := bar_index - N
+
+var int   pDir   = 0
+var float pEntry = na
+var float pStop  = na
+var float pZero  = na
+var int   pStart = na
+
+if useFib and newPL and not na(lastPH) and lastPHbar < lastPLbar and flat
+    leg = lastPH - lastPL
+    lvl = lastPL + fibLvl * leg
+    ok = leg >= minLeg and leg <= maxLeg and not (hiN >= lvl)
+    ok := ok and (not useTrend or trend < 0)
+    ok := ok and (not useBos or (not na(prevPL) and lastPL < prevPL))
+    ok := ok and (not useSweep or (not na(prevPH) and lastPH > prevPH))
+    if ok
+        pDir := -1
+        pEntry := lvl
+        pStop := lastPH + stopBuf
+        pZero := lastPL
+        pStart := bar_index
+
+if useFib and newPH and not na(lastPL) and lastPLbar < lastPHbar and flat
+    leg = lastPH - lastPL
+    lvl = lastPH - fibLvl * leg
+    ok = leg >= minLeg and leg <= maxLeg and not (loN <= lvl)
+    ok := ok and (not useTrend or trend > 0)
+    ok := ok and (not useBos or (not na(prevPH) and lastPH > prevPH))
+    ok := ok and (not useSweep or (not na(prevPL) and lastPL < prevPL))
+    if ok
+        pDir := 1
+        pEntry := lvl
+        pStop := lastPL - stopBuf
+        pZero := lastPH
+        pStart := bar_index
+
+if pDir != 0 and flat
+    expired = bar_index - pStart > expiryBars
+    broken  = (pDir == -1 and low < pZero) or (pDir == 1 and high > pZero)
+    if expired or broken or flatSess
+        pDir := 0
+
+fibOk = pDir != 0 and flat and not lossHit and (not useNY or rthSess) and not flatSess
+if fibOk
+    if pDir == -1
+        strategy.entry("Fib S", strategy.short, limit=pEntry)
+    else
+        strategy.entry("Fib L", strategy.long, limit=pEntry)
+else if flat
+    strategy.cancel("Fib S")
+    strategy.cancel("Fib L")
+
+var int fibFill = na
+if (curId == "Fib L" or curId == "Fib S")
+    if strategy.position_size[1] == 0
+        fibFill := bar_index
+    d = curId == "Fib L" ? 1 : -1
+    e = strategy.position_avg_price
+    r = math.abs(e - pStop)
+    strategy.exit("Fib X", curId, stop=pStop, limit=e + d * fibRR * r)
+    strategy.cancel("LON L")
+    strategy.cancel("LON S")
+    if bar_index - fibFill >= maxHold
+        strategy.close(curId, comment="Fib max hold")
+if flat and strategy.position_size[1] != 0 and pDir != 0 and strategy.closedtrades > 0
+    if str.startswith(strategy.closedtrades.entry_id(strategy.closedtrades - 1), "Fib")
+        pDir := 0
+
+// ---------- Flatten ----------
+if flatSess or lossHit
+    strategy.close_all("Flat")
+
+// ---------- Plots & alerts ----------
+plot(inSess(lonTrade) or inSess(londonSess) ? lonH : na, "London high", color=color.new(color.teal, 0),   style=plot.style_linebr)
+plot(inSess(lonTrade) or inSess(londonSess) ? lonL : na, "London low",  color=color.new(color.orange, 0), style=plot.style_linebr)
+plot(pDir != 0 ? pEntry : na, "Fib 0.786 entry", color=color.new(color.blue, 0),  style=plot.style_linebr, linewidth=2)
+plot(pDir != 0 ? pStop  : na, "Fib stop",        color=color.new(color.red, 0),   style=plot.style_linebr)
+plot(pDir != 0 ? pZero  : na, "Fib 0",           color=color.new(color.green, 0), style=plot.style_linebr)
+bgcolor(inSess(londonSess) ? color.new(color.gray, 93) : na, title="London session")
+alertcondition(inSess(lonTrade) and (ta.crossover(high, lonH) or ta.crossunder(low, lonL)), "London break", "NQ broke the London range")
+alertcondition(pDir != 0 and pStart == bar_index, "Fib setup armed", "Fib 0.786 setup armed on NQ")
