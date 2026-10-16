@@ -1,0 +1,102 @@
+//@version=6
+strategy("Babs Algo Strategy", shorttitle="Babs Algo Strat", overlay=true,
+     pyramiding=0, initial_capital=50000, default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.75, slippage=1,
+     process_orders_on_close=false)
+
+// ---------- Signal inputs (same as the indicator) ----------
+timer  = 21
+source = input(hl2, "Source")
+MTP    = input(1.4, "ATR multiplier")
+sf     = input.float(1, "Sensitivity [0,1]", minval=0, maxval=1)
+mSw    = input.string("Hull_moving_average", "Hull Type", options=["Hull_moving_average", "Triple_hull_moving_average", "Exponential_hull_moving_average"])
+length = input(27, "Hull length")
+
+// ---------- Strategy inputs ----------
+tradeDir   = input.string("Both", "Direction", options=["Both", "Long only", "Short only"], group="Strategy")
+exitMode   = input.string("Hull flip or opposite signal", "Exit", options=["Hull flip or opposite signal", "Opposite signal only"], group="Strategy")
+useStop    = input.bool(true,  "Use hard stop", group="Strategy")
+stopAtrX   = input.float(2.0,  "Hard stop (x ATR)", step=0.25, group="Strategy")
+useSession = input.bool(true,  "Only enter during session", group="Strategy")
+sess       = input.session("0930-1555", "Entry session (ET)", group="Strategy")
+useFlat    = input.bool(true,  "Flatten daily (prop-firm rule)", group="Strategy")
+flatSess   = input.session("1555-1800", "Flatten window (ET)", group="Strategy")
+tz = "America/New_York"
+
+// ---------- Trend engine (unchanged logic) ----------
+avg = 0.
+src = sf * source + (1 - sf) * nz(avg[1], source)
+atr = ta.sma(ta.tr, timer)
+up  = src - MTP * atr
+up1 = nz(up[1], up)
+up := close[1] > up1 ? math.max(up, up1) : up
+dn  = src + MTP * atr
+dn1 = nz(dn[1], dn)
+dn := close[1] < dn1 ? math.min(dn, dn1) : dn
+avg := math.avg(up, dn)
+
+trend = 1
+trend := nz(trend[1], trend)
+trend := trend == -1 and close > dn1 ? 1 : trend == 1 and close < up1 ? -1 : trend
+
+LongSignal  = trend == 1 and trend[1] == -1
+ShortSignal = trend == -1 and trend[1] == 1
+
+// ---------- Hull (exit signal) ----------
+hMa(_src, _length) => ta.hma(_src, _length)
+eHmA(_src, _length) => ta.ema(2 * ta.ema(_src, _length / 2) - ta.ema(_src, _length), math.round(math.sqrt(_length)))
+tHmA(_src, _length) => ta.wma(ta.wma(_src, _length / 3) * 3 - ta.wma(_src, _length / 2) - ta.wma(_src, _length), _length)
+MDe(_sw, _src, _len) =>
+    _sw == "Hull_moving_average" ? hMa(_src, _len) : _sw == "Exponential_hull_moving_average" ? eHmA(_src, _len) : tHmA(_src, _len / 2)
+
+source_t = sf * close + (1 - sf) * avg
+hUll     = MDe(mSw, source_t, length)
+hullUp   = hUll > hUll[2]
+LongExit  = trend == 1  and not hullUp and hullUp[1]
+ShortExit = trend == -1 and hullUp and not hullUp[1]
+
+// ---------- Orders ----------
+inSess  = not useSession or not na(time(timeframe.period, sess, tz))
+inFlat  = useFlat and not na(time(timeframe.period, flatSess, tz))
+allowL  = tradeDir != "Short only"
+allowS  = tradeDir != "Long only"
+
+if LongSignal
+    strategy.close("Short", comment="Opp signal")
+    if allowL and inSess and not inFlat
+        strategy.entry("Long", strategy.long)
+if ShortSignal
+    strategy.close("Long", comment="Opp signal")
+    if allowS and inSess and not inFlat
+        strategy.entry("Short", strategy.short)
+
+if exitMode == "Hull flip or opposite signal"
+    if LongExit
+        strategy.close("Long", comment="Hull flip")
+    if ShortExit
+        strategy.close("Short", comment="Hull flip")
+
+if useStop and strategy.position_size > 0
+    strategy.exit("L stop", "Long", stop=strategy.position_avg_price - stopAtrX * atr)
+if useStop and strategy.position_size < 0
+    strategy.exit("S stop", "Short", stop=strategy.position_avg_price + stopAtrX * atr)
+
+if inFlat
+    strategy.close_all("Session flat")
+
+// ---------- Visuals ----------
+hullColor = hullUp ? #77E1A3 : #E10078
+f1 = plot(hUll, "Hull", color=hullColor)
+f2 = plot(hUll[2], "Hull lag", color=hullColor)
+fill(f1, f2, color=color.new(hullColor, 75))
+plot(trend == 1 ? up : na, "Trend stop (up)", color=#77E1A3, style=plot.style_linebr)
+plot(trend == -1 ? dn : na, "Trend stop (down)", color=#E10078, style=plot.style_linebr)
+plotshape(LongSignal,  "BULL", shape.labelup,   location.belowbar, color.green, text="BULL", textcolor=color.white, size=size.small)
+plotshape(ShortSignal, "BEAR", shape.labeldown, location.abovebar, color.red,   text="BEAR", textcolor=color.white, size=size.small)
+plotshape(LongExit,  "Close long",  shape.triangledown, location.abovebar, color.gray, text="Close", size=size.tiny)
+plotshape(ShortExit, "Close short", shape.triangleup,   location.belowbar, color.gray, text="Close", size=size.tiny)
+barcolor(trend == 1 ? color.green : color.red)
+
+alertcondition(LongSignal, "BULL", "BULL")
+alertcondition(ShortSignal, "BEAR", "BEAR")
+alertcondition(LongExit or ShortExit, "Close", "Close")
